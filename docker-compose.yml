@@ -1,0 +1,35 @@
+services:
+  # ─── MongoDB ───────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: congiuntura-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Application ───────────────────────────────────────────
+  app:
+    build: .
+    container_name: congiuntura-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Mount config and templates so changes don't require a rebuild
+      - ./config:/app/config:ro
+      - ./templates:/app/templates:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:

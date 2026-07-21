@@ -1,0 +1,94 @@
+# ─── congiuntura-live feeds configuration ─────────────────────────
+# This file defines the RSS/Atom feeds monitored by the aggregator.
+# You can edit it freely — the application reloads it on each poll cycle.
+#
+# Each section is an agency (publisher). The key becomes the `publisher` slug.
+# Add as many [[<agency>.feeds]] entries as needed.
+# ───────────────────────────────────────────────────────────────────
+
+# ══════════════════════════════════════════════════════════════════
+# Eurostat — European Union statistical office (EN, Atom)
+# ══════════════════════════════════════════════════════════════════
+[eurostat]
+name = "Eurostat"
+language = "en"
+
+[[eurostat.feeds]]
+label = "News releases"
+url = "https://ec.europa.eu/eurostat/en/search?p_p_id=estatsearchportlet_WAR_estatsearchportlet&p_p_lifecycle=2&p_p_state=maximized&p_p_mode=view&p_p_resource_id=atom&_estatsearchportlet_WAR_estatsearchportlet_collection=CAT_PREREL"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Istat — Italian National Institute of Statistics (IT, RSS 2.0)
+# Feed URLs: https://www.istat.it/tema/<topic>/feed
+# ══════════════════════════════════════════════════════════════════
+[istat]
+name = "Istat"
+language = "it"
+
+[[istat.feeds]]
+label = "National accounts"
+url = "https://www.istat.it/tema/conti-nazionali/feed"
+
+[[istat.feeds]]
+label = "Prices"
+url = "https://www.istat.it/tema/prezzi/feed"
+
+[[istat.feeds]]
+label = "Industry and construction"
+url = "https://www.istat.it/tema/industria-e-costruzioni/feed"
+
+[[istat.feeds]]
+label = "Services"
+url = "https://www.istat.it/tema/servizi/feed"
+
+[[istat.feeds]]
+label = "Foreign trade"
+url = "https://www.istat.it/tema/commercio-estero-e-internazionalizzazione/feed"
+
+[[istat.feeds]]
+label = "Labor and wages"
+url = "https://www.istat.it/tema/lavoro-e-retribuzioni/feed"
+
+
+# ══════════════════════════════════════════════════════════════════
+# INE — Spanish National Statistics Institute (ES, RSS 2.0)
+# ══════════════════════════════════════════════════════════════════
+[ine]
+name = "INE"
+language = "es"
+
+[[ine.feeds]]
+label = "Press releases"
+url = "https://ine.es/dyngs/Prensa/es/rssNovedades.xml"
+
+
+# ══════════════════════════════════════════════════════════════════
+# INSEE — French National Institute of Statistics (EN, RSS 2.0)
+# Feed URLs: https://www.insee.fr/en/flux/<id>
+#   30 = Economic outlook, 31 = Publications
+# French versions available at https://www.insee.fr/fr/flux/<id>
+# ══════════════════════════════════════════════════════════════════
+[insee]
+name = "INSEE"
+language = "en"
+
+[[insee.feeds]]
+label = "Economic outlook"
+url = "https://www.insee.fr/en/flux/30"
+
+[[insee.feeds]]
+label = "Publications"
+url = "https://www.insee.fr/en/flux/31"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Destatis — German Federal Statistical Office (DE, RSS 2.0)
+# ══════════════════════════════════════════════════════════════════
+[destatis]
+name = "Destatis"
+language = "de"
+
+[[destatis.feeds]]
+label = "Press releases"
+url = "https://www.destatis.de/Aktuelles.xml"

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Congiuntura Live</title>
+    <!-- Pico CSS (classless, zero-build) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/css@2/pico.min.css">
+    <style>
+        body { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem; }
+        header { text-align: center; padding: 1rem 0; }
+        header h1 { margin-bottom: 0.25rem; }
+        header .subtitle { color: var(--muted-color); font-size: 0.9rem; }
+        .search-bar {
+            display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;
+            padding: 1rem; background: var(--card-background-color);
+            border-radius: 8px; margin-bottom: 1.5rem;
+        }
+        .search-bar label { margin-bottom: 0; flex: 1; min-width: 150px; }
+        .search-bar select, .search-bar input { margin-bottom: 0; }
+        .search-bar button { margin-bottom: 0; white-space: nowrap; }
+        .stats { font-size: 0.85rem; color: var(--muted-color); margin-bottom: 0.5rem; }
+        #results table { width: 100%; }
+        #results td { vertical-align: top; padding: 0.75rem 0.5rem; }
+        #results tr { border-bottom: 1px solid var(--table-border-color); }
+        .badge {
+            display: inline-block; padding: 0.15rem 0.5rem;
+            border-radius: 4px; font-size: 0.8rem; font-weight: 600;
+            background: var(--primary); color: var(--primary-inverse);
+            white-space: nowrap;
+        }
+        .badge.eurostat { background: #0064c8; }
+        .badge.istat { background: #005e4a; }
+        .badge.ine { background: #c8102e; }
+        .badge.insee { background: #000091; }
+        .badge.destatis { background: #444; }
+        .feed-label { font-size: 0.75rem; color: var(--muted-color); margin-top: 0.2rem; }
+        .summary { font-size: 0.85rem; color: var(--muted-color); margin-top: 0.3rem; }
+        .empty { text-align: center; color: var(--muted-color); padding: 2rem; }
+        .loading { opacity: 0.5; }
+        footer { text-align: center; margin-top: 3rem; color: var(--muted-color); font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📊 Congiuntura Live</h1>
+        <div class="subtitle">European statistics press releases — Eurostat · Istat · INE · INSEE · Destatis</div>
+    </header>
+
+    {% block content %}{% endblock %}
+
+    <footer>
+        <p>Congiuntura Live · <a href="https://github.com/paluigi-moltis/congiuntura-live">GitHub</a> · Auto-refreshing every {{ poll_interval }} min</p>
+    </footer>
+
+    <!-- Datastar SDK -->
+    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.1/bundles/datastar.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# ══════════════════════════════════════════════════════════════════
+# congiuntura-live — application configuration
+# Edit freely; the application reads this file on startup.
+# ══════════════════════════════════════════════════════════════════
+
+[polling]
+# How often (in minutes) to fetch all configured RSS feeds.
+interval_minutes = 5
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[logging]
+level = "INFO"

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Search signals: reactive state shared with Datastar -->
+<script type="module">
+    ds.signal('publisher', 'all');
+    ds.signal('date_from', '');
+    ds.signal('date_to', '');
+</script>
+
+<div class="search-bar"
+     data-signals
+     data-on-load="@get('/search')">
+
+    <label>
+        Publisher
+        <select name="publisher"
+                data-bind="publisher"
+                data-on-change="@get('/search')">
+            <option value="all">All agencies</option>
+            {% for slug, name in publishers %}
+            <option value="{{ slug }}">{{ name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+
+    <label>
+        From
+        <input type="date"
+               data-bind="date_from"
+               data-on-change="@get('/search')">
+    </label>
+
+    <label>
+        To
+        <input type="date"
+               data-bind="date_to"
+               data-on-change="@get('/search')">
+    </label>
+</div>
+
+<div class="stats">
+    <span data-text="'' + ({{ total }}) + ' total releases in database'"></span>
+</div>
+
+<!-- Results: replaced via Datastar SSE -->
+<div id="results" data-indicator>
+    <table>
+        <tr><td colspan="3" class="empty">Loading…</td></tr>
+    </table>
+</div>
+
+{% endblock %}
