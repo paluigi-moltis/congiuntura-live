@@ -1,219 +1,173 @@
-# PLAN.md — congiuntura-live
+# PLAN.md — Phase 2: LLM Processing with outlines-cascade
+
+> **Status:** Awaiting user confirmation on topic/country Literal lists.
+> Implementation will proceed once the taxonomy is finalized.
+
+---
 
 ## Overview
 
-A real-time aggregator of RSS/Atom feeds from 5 European official statistics agencies.
-Press releases are fetched periodically, deduplicated, and stored in MongoDB.
-A web interface (FastAPI + Datastar) lets the user filter by publisher and date range.
-
-The name *Congiuntura Live* reflects the focus on **economic conjuncture** (consumer prices,
-producer prices, GDP, industrial production, international trade, etc.).
+Process raw press releases through outlines-cascade to extract structured data
+(topic, country, sentiment, English summary, key figures) using a Pydantic model
+defined as a config file. The processed results replace raw feeds as the main
+page content; raw feeds move to a secondary page.
 
 ---
 
 ## Architecture
 
+### Two-model split (anti-hallucination)
+
+The LLM generates **only** the fields it can reason about. Link, date, and
+publisher metadata are copied verbatim from the raw feed **after** generation.
+
 ```
-┌──────────────────────────────────────────────────────────┐
-│                   congiuntura-live app                    │
-│                                                          │
-│  ┌──────────────┐   ┌─────────────┐   ┌───────────────┐  │
-│  │  FeedReader   │──▶│  Deduplicator│──▶│  Repository   │  │
-│  │ (RSS/Atom)   │   │  (URL hash)  │   │  (MongoDB)    │  │
-│  └──────────────┘   └─────────────┘   └───────┬───────┘  │
-│          ▲                                      │         │
-│          │                                ┌─────▼───────┐  │
-│   ┌──────┴───────┐                        │  Web UI     │  │
-│   │  Scheduler    │                        │ (Datastar)  │  │
-│   │ (APScheduler) │                        │ + FastAPI   │  │
-│   └──────────────┘                        └─────────────┘  │
-└──────────────────────────────────────────────────────────┘
-         │                                          │
-         ▼                                          ▼
-   RSS feeds (5 agencies)                    MongoDB container
+LLMExtraction (what the LLM sees)      ProcessedRelease (what gets stored)
+┌──────────────────────────┐           ┌──────────────────────────────────┐
+│ topic: Literal[...]       │           │ url_hash          ← from raw     │
+│ country: Literal[...]     │    +      │ url, title        ← from raw     │
+│ sentiment: Literal[...]   │           │ publisher         ← from raw     │
+│ summary_en: str           │           │ published         ← from raw     │
+│ key_figures: str          │           │ processing_model  ← from cascade │
+└──────────────────────────┘           │ processed_at      ← timestamp    │
+                                       └──────────────────────────────────┘
 ```
+
+### Processing pipeline
+
+```
+RSS Poll (5 min)                   Processing Poll (configurable)
+     │                                      │
+     ▼                                      ▼
+press_releases (raw)          Select unprocessed: url_hash NOT IN processed
+     │                                      │
+     │                              For each item:
+     │                              1. Scrape URL → extract text (trafilatura)
+     │                              2. Build prompt: title + extracted text
+     │                              3. outlines-cascade generate(LLMExtraction)
+     │                              4. Assemble ProcessedRelease
+     │                              5. Insert into processed_releases
+     │                                      │
+     ▼                                      ▼
+press_releases                     processed_releases → main web page
+```
+
+Two MongoDB collections linked by `url_hash` (common id).
+Incremental processing: only processes items not yet in processed_releases.
 
 ### Components
 
-| Component | Responsibility |
-|-----------|---------------|
-| `FeedReader` | Fetches and parses RSS/Atom feeds, normalizes entries to `PressRelease` |
-| `Deduplicator` | Uses URL-based SHA-256 hash to detect duplicates across feeds and runs |
-| `Repository` | Async MongoDB CRUD (motor), indexes on `publisher`, `published`, `url_hash` |
-| `Scheduler` | APScheduler periodic job that polls all configured feeds |
-| `WebApp` | FastAPI app serving Jinja2 templates + Datastar SSE for search/filter |
-
-### Tech Stack
-
-- **Python 3.12+** with `uv` for dependency management
-- **FastAPI** — async web framework
-- **Datastar** (`datastar-py`) — hypermedia frontend (SSE)
-- **Motor** — async MongoDB driver
-- **feedparser** — RSS/Atom parsing
-- **APScheduler** — periodic feed polling
-- **Pydantic v2** — data models and settings
-- **Jinja2** — server-side HTML templates
-- **Pico CSS** — classless CSS for Datastar pages (CDN)
-- **Docker / Docker Compose** — containerization
-
----
-
-## RSS Feed Inventory (verified 2025-07-21)
-
-All feed URLs are stored in `config/feeds.toml` and can be edited manually.
-
-| Agency | Language | Format | Confirmed URL(s) |
-|--------|----------|--------|------------------|
-| **Eurostat** | EN | Atom | `https://ec.europa.eu/eurostat/en/search?...resource_id=atom&...collection=CAT_PREREL` |
-| **Istat** | IT | RSS 2.0 | Per-topic: `https://www.istat.it/tema/{topic}/feed` |
-| **INE (Spain)** | ES | RSS 2.0 | `https://ine.es/dyngs/Prensa/es/rssNovedades.xml` |
-| **INSEE (France)** | EN | RSS 2.0 | `https://www.insee.fr/en/flux/30` (Economic outlook), `/flux/31` (Publications) |
-| **Destatis (Germany)** | DE | RSS 2.0 | `https://www.destatis.de/Aktuelles.xml` |
-
-> **Language policy**: English where available (Eurostat, INSEE English flux), native
-> language otherwise (Istat IT, INE ES, Destatis DE). INSEE offers both `/fr/flux/N`
-> and `/en/flux/N` — we default to EN for the economic feeds.
-
----
-
-## Data Model
-
-### `PressRelease` (MongoDB document)
-
-```json
-{
-  "_id": ObjectId,
-  "url_hash": "sha256hex",       // dedup key — hash of canonical URL
-  "url": "https://...",           // original press release URL
-  "title": "...",
-  "summary": "...",               // RSS <description> or Atom <summary>
-  "publisher": "istat",           // agency slug
-  "publisher_full": "Istat",      // display name
-  "feed_label": "Conti nazionali",// which feed/topic within the agency
-  "language": "it",
-  "published": ISODate,           // publication date from feed
-  "fetched_at": ISODate,          // when we ingested it
-  "tags": ["prices", "inflation"] // optional topic tags from feed
-}
-```
-
-**Indexes**: `url_hash` (unique), `publisher`, `published` (descending), `(publisher, published)`.
-
-### Deduplication Strategy
-
-1. Each entry's canonical URL is SHA-256 hashed → `url_hash`
-2. Before insert, check if `url_hash` already exists in MongoDB
-3. If exists → skip (already seen). If new → insert.
-4. This handles cross-feed duplicates (same press release appearing in multiple feeds).
-
----
-
-## Project Structure
-
-```
-congiuntura-live/
-├── config/
-│   └── feeds.toml              # Editable RSS feed configuration
-├── src/
-│   └── congiuntura_live/
-│       ├── __init__.py
-│       ├── settings.py          # Pydantic settings from .env
-│       ├── models.py            # PressRelease Pydantic model
-│       ├── feed_reader.py       # FeedReader class
-│       ├── repository.py        # Async MongoDB repository
-│       ├── scheduler.py         # APScheduler integration
-│       └── app.py               # FastAPI app + Datastar routes
-├── templates/
-│   ├── base.html                # Layout: Pico CSS + Datastar CDN
-│   ├── index.html               # Search mask + results
-│   └── _results.html            # Partial: results table fragment
-├── tests/
-│   ├── test_feed_reader.py      # Parsing tests with fixture XML
-│   ├── test_dedup.py            # Deduplication logic
-│   └── test_repository.py       # Repository (mocked Mongo)
-├── Dockerfile
-├── docker-compose.yml
-├── .env.example
-├── pyproject.toml
-├── PLAN.md
-└── README.md
-```
-
----
-
-## Implementation Phases
-
-### Phase 1: Project scaffold + config
-- `pyproject.toml` with `uv`, Ruff, Black
-- `config/feeds.toml` — per-agency editable feed config
-- `settings.py` — Pydantic `BaseSettings` loading from `.env`
-- `.env.example`
-
-### Phase 2: Core ingestion
-- `models.py` — `PressRelease` Pydantic model
-- `feed_reader.py` — `FeedReader` class (async HTTP fetch + feedparser)
-- `repository.py` — async MongoDB repository (motor)
-- Deduplication via `url_hash`
-
-### Phase 3: Scheduler
-- `scheduler.py` — APScheduler `AsyncIOScheduler`
-- Configurable poll interval (default: 30 min)
-
-### Phase 4: Web UI
-- `app.py` — FastAPI app with Datastar SSE endpoints
-- Search mask: publisher dropdown + date range (from/to)
-- Results rendered as HTML fragments via Datastar
-- Pico CSS for styling
-
-### Phase 5: Dockerization
-- `Dockerfile` (multi-stage, slim image)
-- `docker-compose.yml` (app + MongoDB as separate containers)
-
-### Phase 6: Tests + docs
-- Pytest tests for feed parsing, dedup, repository
-- `README.md` with setup, usage, architecture docs
-- Push to GitHub
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| **Scraper** | `scraper.py` | Async fetch + trafilatura extraction, fallback to summary |
+| **Processor** | `processor.py` | outlines-cascade pipeline, assembles ProcessedRelease |
+| **ProcessedRepository** | `repository.py` (extended) | CRUD on processed_releases collection |
 
 ---
 
 ## Configuration
 
-### `config/feeds.toml` (user-editable)
+### `config/extraction_model.py` (editable)
 
-```toml
-[eurostat]
-name = "Eurostat"
-language = "en"
+```python
+from typing import Literal
+from pydantic import BaseModel, Field
 
-[[eurostat.feeds]]
-label = "News releases"
-url = "https://ec.europa.eu/eurostat/en/search?...atom...CAT_PREREL"
-
-[istat]
-name = "Istat"
-language = "it"
-
-[[istat.feeds]]
-label = "National accounts"
-url = "https://www.istat.it/tema/conti-nazionali/feed"
-
-# ... more feeds per agency
+class LLMExtraction(BaseModel):
+    """Fields generated by the LLM. Link/date/publisher are NOT here."""
+    topic: Literal[...] = Field(description="...")
+    country: Literal[...] = Field(description="...")
+    sentiment: Literal["positive", "negative", "neutral"] = Field(...)
+    summary_en: str = Field(description="Concise English summary (2-3 sentences)")
+    key_figures: str = Field(description="Key numerical figures")
 ```
 
-### `.env` (secrets)
+### `config/llm.toml` (outlines-cascade native format)
 
-```env
-MONGODB_URL=mongodb://mongo:27017
-MONGODB_DATABASE=congiuntura
-POLL_INTERVAL_MINUTES=30
-LOG_LEVEL=INFO
+```toml
+[providers.ollama]
+type = "ollama"
+
+[cascades.conjuncture]
+entries = [{ provider = "ollama", model = "llama3.1" }]
+```
+
+### `config/app.toml` (additions)
+
+```toml
+[processing]
+enabled = true
+llm_config = "config/llm.toml"
+cascade_name = "conjuncture"
+interval_minutes = 2
+max_content_chars = 4000
 ```
 
 ---
 
-## Out of Scope (Phase 2 — future)
+## Auto-generated filter UI
 
-- LLM processing with Llama + outlines-cascade
-- Full-text search of press release bodies
-- Email/Slack notifications
-- User authentication
+The main page introspects `LLMExtraction.model_fields` to build filters:
+
+| Pydantic type | Filter control |
+|---------------|----------------|
+| `Literal[...]` | `<select>` dropdown |
+| `str` | Text search |
+| `datetime` | Date range |
+| `bool` | Checkbox |
+
+Non-filterable auto fields (e.g. `processing_model`) are shown in cards only.
+
+---
+
+## Data Model
+
+### `ProcessedRelease` (MongoDB document in `processed_releases`)
+
+```json
+{
+  "url_hash": "sha256hex",
+  "url": "https://...",
+  "title": "Original title from raw feed",
+  "publisher": "istat",
+  "publisher_full": "Istat",
+  "feed_label": "National accounts",
+  "language": "it",
+  "published": ISODate,
+  "fetched_at": ISODate,
+  "processed_at": ISODate,
+  "processing_model": "ollama/llama3.1",
+  "topic": "GDP",
+  "country": "Italy",
+  "sentiment": "neutral",
+  "summary_en": "GDP rose by 0.3% in Q1 2025...",
+  "key_figures": "+0.3% QoQ, +0.9% YoY"
+}
+```
+
+---
+
+## UI Changes
+
+- **`/`** (main page) → Processed releases with auto-generated filters + cards
+- **`/raw`** (secondary page) → Raw feeds (existing search interface, relocated)
+
+The "Reprocess" button on the main page triggers processing of all raw items
+not yet present in the processed collection (incremental, never re-processes).
+
+---
+
+## Draft Taxonomy (pending user confirmation)
+
+### Topics (draft — user will provide corrections)
+
+Consumer prices, Producer prices, GDP, Industrial production, International trade,
+Labour market, Public finance, Retail trade, Construction, Business surveys, Other
+
+### Countries (draft)
+
+Euro area, European Union, Italy, Spain, France, Germany, Other
+
+### Sentiment
+
+positive, negative, neutral
