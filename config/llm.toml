@@ -1,0 +1,32 @@
+# ══════════════════════════════════════════════════════════════════
+# congiuntura-live — LLM processing configuration (outlines-cascade)
+# ══════════════════════════════════════════════════════════════════
+#
+# This is a native outlines-cascade config file. It defines providers
+# and cascades for structured generation.
+#
+# API keys are NEVER stored here — only the environment variable name
+# (api_key_env). Put the actual key in your .env file:
+#   OPENROUTER_API_KEY=sk-or-v1-...
+#
+# The primary provider is OpenRouter (cloud), which gives access to
+# many models via an OpenAI-compatible API.
+
+# ─── Providers ───────────────────────────────────────────────
+
+[providers.openrouter]
+type = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[providers.ollama]
+type = "ollama"
+
+# ─── Cascades ────────────────────────────────────────────────
+# Tried in order: if the first fails, the next is attempted.
+
+[cascades.conjuncture]
+entries = [
+    { provider = "openrouter", model = "meta-llama/llama-3.3-70b-instruct" },
+    { provider = "ollama", model = "llama3.1" },
+]

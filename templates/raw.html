@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block nav_raw %}active{% endblock %}
+{% block content %}
+
+<script type="module">
+    ds.signal('publisher', 'all');
+    ds.signal('date_from', '');
+    ds.signal('date_to', '');
+</script>
+
+<div class="search-bar" data-signals data-on-load="@get('/search-raw')">
+
+    <label>
+        Publisher
+        <select data-bind="publisher" data-on-change="@get('/search-raw')">
+            <option value="all">All agencies</option>
+            {% for slug, name in publishers %}
+            <option value="{{ slug }}">{{ name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+
+    <label>
+        From
+        <input type="date" data-bind="date_from" data-on-change="@get('/search-raw')">
+    </label>
+
+    <label>
+        To
+        <input type="date" data-bind="date_to" data-on-change="@get('/search-raw')">
+    </label>
+</div>
+
+<div class="stats">
+    <span>{{ total }} raw releases in database</span>
+</div>
+
+<div id="results" data-indicator>
+    <table>
+        <tr><td colspan="3" class="empty">Loading…</td></tr>
+    </table>
+</div>
+
+{% endblock %}

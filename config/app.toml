@@ -13,3 +13,17 @@ port = 8000
 
 [logging]
 level = "INFO"
+
+[processing]
+# Enable/disable LLM processing of raw press releases.
+enabled = true
+# outlines-cascade config file (providers + cascades).
+llm_config = "config/llm.toml"
+# Which cascade to use (defined in llm_config).
+cascade_name = "conjuncture"
+# How often to poll for unprocessed releases (minutes).
+interval_minutes = 2
+# Max chars of scraped content to send to the LLM (avoids token explosion).
+max_content_chars = 4000
+# Path to the Pydantic model defining LLM-extracted fields.
+model_path = "config/extraction_model.py"

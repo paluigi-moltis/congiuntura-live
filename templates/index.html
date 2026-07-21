@@ -1,22 +1,24 @@
 {% extends "base.html" %}
+{% block nav_main %}active{% endblock %}
 {% block content %}
 
-<!-- Search signals: reactive state shared with Datastar -->
+<!-- Datastar reactive signals -->
 <script type="module">
     ds.signal('publisher', 'all');
     ds.signal('date_from', '');
     ds.signal('date_to', '');
+    ds.signal('topic', 'all');
+    ds.signal('country', 'all');
+    ds.signal('sentiment', 'all');
+    ds.signal('summary_en', '');
+    ds.signal('key_figures', '');
 </script>
 
-<div class="search-bar"
-     data-signals
-     data-on-load="@get('/search')">
+<div class="search-bar" data-signals data-on-load="@get('/search')">
 
     <label>
         Publisher
-        <select name="publisher"
-                data-bind="publisher"
-                data-on-change="@get('/search')">
+        <select data-bind="publisher" data-on-change="@get('/search')">
             <option value="all">All agencies</option>
             {% for slug, name in publishers %}
             <option value="{{ slug }}">{{ name }}</option>
@@ -24,30 +26,49 @@
         </select>
     </label>
 
+    {% for filter in filters %}
+    {% if filter.type == 'select' %}
+    <label>
+        {{ filter.name | replace('_', ' ') | capitalize }}
+        <select data-bind="{{ filter.name }}" data-on-change="@get('/search')">
+            <option value="all">All</option>
+            {% for choice in filter.choices %}
+            <option value="{{ choice }}">{{ choice }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    {% elif filter.type == 'text' %}
+    <label>
+        {{ filter.name | replace('_', ' ') | capitalize }}
+        <input type="text" placeholder="Search {{ filter.name | replace('_', ' ') }}"
+               data-bind="{{ filter.name }}"
+               data-on-input="@get('/search')">
+    </label>
+    {% endif %}
+    {% endfor %}
+
     <label>
         From
-        <input type="date"
-               data-bind="date_from"
-               data-on-change="@get('/search')">
+        <input type="date" data-bind="date_from" data-on-change="@get('/search')">
     </label>
 
     <label>
         To
-        <input type="date"
-               data-bind="date_to"
-               data-on-change="@get('/search')">
+        <input type="date" data-bind="date_to" data-on-change="@get('/search')">
     </label>
+
+    <button data-on-click="@get('/reprocess')" class="reprocess-btn"
+            {% if not processing_enabled %}disabled title="Processing not enabled"{% endif %}>
+        ♻ Reprocess pending
+    </button>
 </div>
 
 <div class="stats">
-    <span data-text="'' + ({{ total }}) + ' total releases in database'"></span>
+    <span>{{ total }} processed · {{ total_raw }} raw feeds</span>
 </div>
 
-<!-- Results: replaced via Datastar SSE -->
 <div id="results" data-indicator>
-    <table>
-        <tr><td colspan="3" class="empty">Loading…</td></tr>
-    </table>
+    <p class="empty">Loading…</p>
 </div>
 
 {% endblock %}

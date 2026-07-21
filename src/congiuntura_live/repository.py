@@ -1,4 +1,4 @@
-"""Async MongoDB repository using motor."""
+"""Async MongoDB repositories using motor."""
 
 from __future__ import annotations
 
@@ -12,33 +12,43 @@ from .models import PressRelease
 
 logger = logging.getLogger(__name__)
 
-COLLECTION = "press_releases"
+RAW_COLLECTION = "press_releases"
+PROCESSED_COLLECTION = "processed_releases"
 
 
 class PressReleaseRepository:
-    """Asynchronous repository for press releases in MongoDB.
-
-    Implements an async OOP repository pattern over motor.
-    """
+    """Asynchronous repository for raw press releases in MongoDB."""
 
     def __init__(self, mongo_url: str, database_name: str) -> None:
         self._client = AsyncIOMotorClient(mongo_url)
         self._db: AsyncIOMotorDatabase = self._client[database_name]
-        self._collection: AsyncIOMotorCollection = self._db[COLLECTION]
+        self._collection: AsyncIOMotorCollection = self._db[RAW_COLLECTION]
+        self._processed: AsyncIOMotorCollection = self._db[PROCESSED_COLLECTION]
 
     async def ensure_indexes(self) -> None:
-        """Create indexes for dedup and query performance."""
+        """Create indexes for dedup and query performance on both collections."""
+        # Raw collection
         await self._collection.create_index("url_hash", unique=True)
         await self._collection.create_index("publisher")
         await self._collection.create_index([("published", -1)])
         await self._collection.create_index([("publisher", "published")])
-        logger.info("MongoDB indexes ensured on '%s'", COLLECTION)
+        # Processed collection
+        await self._processed.create_index("url_hash", unique=True)
+        await self._processed.create_index("publisher")
+        await self._processed.create_index([("published", -1)])
+        await self._processed.create_index([("publisher", "published")])
+        await self._processed.create_index("topic")
+        await self._processed.create_index("country")
+        await self._processed.create_index("sentiment")
+        await self._processed.create_index("processing_model")
+        logger.info(
+            "MongoDB indexes ensured on '%s' and '%s'",
+            RAW_COLLECTION,
+            PROCESSED_COLLECTION,
+        )
 
     async def insert_many_new(self, releases: list[PressRelease]) -> tuple[int, int]:
-        """Insert releases, skipping duplicates by url_hash.
-
-        Returns (inserted_count, skipped_count).
-        """
+        """Insert raw releases, skipping duplicates by url_hash."""
         inserted = 0
         skipped = 0
         for release in releases:
@@ -52,35 +62,85 @@ class PressReleaseRepository:
             logger.info("Insert: %d new, %d duplicates skipped", inserted, skipped)
         return inserted, skipped
 
-    async def search(
+    # ── Raw collection queries ───────────────────────────────
+
+    async def search_raw(
         self,
         publisher: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """Search press releases by publisher and date range."""
-        query: dict[str, Any] = {}
-        if publisher and publisher != "all":
-            query["publisher"] = publisher
-        date_filter: dict[str, Any] = {}
-        if date_from:
-            date_filter["$gte"] = date_from
-        if date_to:
-            date_filter["$lte"] = date_to
-        if date_filter:
-            query["published"] = date_filter
-
+        """Search raw press releases by publisher and date range."""
+        query = self._build_raw_query(publisher, date_from, date_to)
         cursor = self._collection.find(query, {"_id": 0}).sort("published", -1).limit(limit)
         return await cursor.to_list(length=limit)
 
-    async def count(
+    async def count_raw(
         self,
         publisher: str | None = None,
         date_from: datetime | None = None,
         date_to: datetime | None = None,
     ) -> int:
-        """Count documents matching the search criteria."""
+        query = self._build_raw_query(publisher, date_from, date_to)
+        return await self._collection.count_documents(query)
+
+    async def count_total_raw(self) -> int:
+        return await self._collection.count_documents({})
+
+    async def list_publishers(self) -> list[str]:
+        return await self._collection.distinct("publisher")
+
+    # ── Processed collection queries ─────────────────────────
+
+    async def insert_processed(self, doc: dict[str, Any]) -> bool:
+        """Insert a processed release. Returns True if inserted, False if duplicate."""
+        try:
+            await self._processed.insert_one(doc)
+            return True
+        except Exception:
+            return False
+
+    async def search_processed(
+        self,
+        filters: dict[str, Any] | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Search processed releases by any combination of fields."""
+        query = self._build_processed_query(filters)
+        cursor = self._processed.find(query, {"_id": 0}).sort("published", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def count_processed(self, filters: dict[str, Any] | None = None) -> int:
+        query = self._build_processed_query(filters)
+        return await self._processed.count_documents(query)
+
+    async def count_total_processed(self) -> int:
+        return await self._processed.count_documents({})
+
+    # ── Unprocessed query (join raw minus processed) ─────────
+
+    async def find_unprocessed(self, limit: int = 50) -> list[dict[str, Any]]:
+        """Return raw releases not yet present in the processed collection."""
+        all_raw = await self._collection.find({}, {"_id": 0}).to_list(length=10000)
+        processed_hashes = set(await self._processed.distinct("url_hash"))
+        unprocessed = [r for r in all_raw if r.get("url_hash") not in processed_hashes]
+        logger.info(
+            "Unprocessed: %d raw, %d processed, %d pending",
+            len(all_raw),
+            len(processed_hashes),
+            len(unprocessed),
+        )
+        return unprocessed[:limit]
+
+    # ── Query builders ───────────────────────────────────────
+
+    @staticmethod
+    def _build_raw_query(
+        publisher: str | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> dict[str, Any]:
         query: dict[str, Any] = {}
         if publisher and publisher != "all":
             query["publisher"] = publisher
@@ -91,15 +151,32 @@ class PressReleaseRepository:
             date_filter["$lte"] = date_to
         if date_filter:
             query["published"] = date_filter
-        return await self._collection.count_documents(query)
+        return query
 
-    async def count_total(self) -> int:
-        """Total document count (for dashboard stats)."""
-        return await self._collection.count_documents({})
-
-    async def list_publishers(self) -> list[str]:
-        """Return distinct publisher slugs present in the database."""
-        return await self._collection.distinct("publisher")
+    @staticmethod
+    def _build_processed_query(filters: dict[str, Any] | None) -> dict[str, Any]:
+        """Build a MongoDB query from frontend filter signals."""
+        if not filters:
+            return {}
+        query: dict[str, Any] = {}
+        for field, value in filters.items():
+            if value is None or value == "" or value == "all":
+                continue
+            if field in ("publisher", "topic", "country", "sentiment"):
+                query[field] = value
+            elif field in ("date_from", "date_to"):
+                continue  # handled below
+            elif field in ("summary_en", "key_figures"):
+                query[field] = {"$regex": value, "$options": "i"}
+        # Date range
+        date_filter: dict[str, Any] = {}
+        if filters.get("date_from"):
+            date_filter["$gte"] = filters["date_from"]
+        if filters.get("date_to"):
+            date_filter["$lte"] = filters["date_to"]
+        if date_filter:
+            query["published"] = date_filter
+        return query
 
     async def close(self) -> None:
         self._client.close()
