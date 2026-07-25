@@ -2,8 +2,10 @@
 {% block nav_main %}active{% endblock %}
 {% block content %}
 
-<!-- Filter form: all selects live here so hx-include="closest form" collects all values -->
 <form id="filter-form" class="search-bar">
+    <div class="filter-hint" style="flex-basis: 100%; margin-bottom: 0;">
+        Hold Ctrl/Cmd to select multiple items in the filters below.
+    </div>
 
     <label>
         Publisher
@@ -17,7 +19,6 @@
             <option value="{{ slug }}">{{ name }}</option>
             {% endfor %}
         </select>
-        <span class="hint">Hold Ctrl/Cmd to select multiple</span>
     </label>
 
     {% for filter in filters %}
@@ -33,7 +34,6 @@
             <option value="{{ choice }}">{{ choice }}</option>
             {% endfor %}
         </select>
-        <span class="hint">Hold Ctrl/Cmd to select multiple</span>
     </label>
     {% endfor %}
 
@@ -57,17 +57,33 @@
                hx-swap="innerHTML">
     </label>
 
-    <button type="button"
-            class="reprocess-btn"
-            hx-post="/reprocess"
-            hx-target="#stats"
-            hx-swap="outerHTML"
-            {% if not processing_enabled %}disabled title="Processing not enabled"{% endif %}>
-        ♻ Reprocess pending
-    </button>
+    <div style="display: flex; flex-direction: column; gap: 0.5rem; justify-content: flex-end;">
+        <button type="button" class="reprocess-btn secondary outline btn-sm"
+                hx-post="/reprocess"
+                hx-target="#stats"
+                hx-swap="outerHTML"
+                {% if not processing_enabled %}disabled title="Processing not enabled"{% endif %}>
+            ♻ Reprocess
+        </button>
+        <button type="button" class="btn-sm outline"
+                onclick="document.querySelectorAll('#filter-form select, #filter-form input').forEach(function(el) { if (el.type === 'select-multiple') { for (var i=0;i<el.options.length;i++) el.options[i].selected=false; } else { el.value=''; } }); htmx.trigger('#filter-form select[name=publisher]', 'change');">
+            ✕ Clear filters
+        </button>
+    </div>
 </form>
 
-{% include "_stats.html" with context %}
+<div class="stats">
+    <span id="stats"
+          hx-get="/processing-status"
+          hx-trigger="every 2s"
+          hx-swap="outerHTML"
+          class="stats-inline">
+        Feeds: {{ raw_count }} raw — {{ processed_count }} processed
+        {% if processing %}<span class="spinner">⏳ Processing…</span>{% endif %}
+        {% if reprocess_msg %}<span class="flash">{{ reprocess_msg }}</span>{% endif %}
+    </span>
+    — <span id="retrieved-count">{{ processed_count }} retrieved</span>
+</div>
 
 <div id="results" hx-get="/search" hx-trigger="load" hx-swap="innerHTML">
     <p class="empty">Loading…</p>

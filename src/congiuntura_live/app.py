@@ -235,7 +235,11 @@ async def search(
     date_from: str = Query(default=""),
     date_to: str = Query(default=""),
 ):
-    """htmx endpoint: filter processed releases, return card fragment."""
+    """htmx endpoint: filter processed releases, return card fragment.
+
+    The response includes an out-of-band swap that updates the
+    ``#retrieved-count`` element with the number of filtered results.
+    """
     repo = _get_repo()
     filters: dict[str, Any] = {}
     for key, vals in (("publisher", publisher), ("topic", topic), ("country", country), ("sentiment", sentiment)):
@@ -245,10 +249,11 @@ async def search(
     filters["date_to"] = _parse_date(date_to)
 
     results = await repo.search_processed(filters=filters, limit=200)
+    total_matching = await repo.count_processed(filters=filters)
     return templates.TemplateResponse(
         request,
         "_processed_cards.html",
-        {"request": request, "results": results},
+        {"request": request, "results": results, "retrieved_count": total_matching},
     )
 
 
@@ -261,16 +266,21 @@ async def search_raw(
 ):
     """htmx endpoint: filter raw releases, return table fragment."""
     repo = _get_repo()
+    parsed_from = _parse_date(date_from)
+    parsed_to = _parse_date(date_to)
     results = await repo.search_raw(
         publisher=publisher,
-        date_from=_parse_date(date_from),
-        date_to=_parse_date(date_to),
+        date_from=parsed_from,
+        date_to=parsed_to,
         limit=200,
+    )
+    total_matching = await repo.count_raw(
+        publisher=publisher, date_from=parsed_from, date_to=parsed_to
     )
     return templates.TemplateResponse(
         request,
         "_raw_rows.html",
-        {"request": request, "results": results},
+        {"request": request, "results": results, "retrieved_count": total_matching},
     )
 
 
