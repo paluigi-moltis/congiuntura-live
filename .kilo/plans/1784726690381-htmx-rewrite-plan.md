@@ -1,152 +1,124 @@
-# Plan: Replace Datastar with htmx
+# Plan: Migrate secrets from .env file to environment variables
 
 ## Goal
 
-Replace the Datastar SDK frontend with htmx. The Datastar SDK has persistent,
-unreproducible-in-headless bugs (filters don't fire `change` listeners, signal
-binding conflicts). htmx is mandated by the project's `global_rules.md` and is a
-mature, well-documented alternative.
+Stop loading secrets from a `.env` file via Pydantic's `env_file` mechanism.
+Instead, read all configuration purely from OS environment variables. This is
+the standard pattern for cloud deployments (Kubernetes secrets, AWS task
+definitions, Docker Compose `environment:` blocks).
+
+The `.env` file remains for local development convenience (loaded by the
+shell or `docker-compose --env-file`), but the **application code no longer
+reads it directly**.
+
+## Current state
+
+- `settings.py` `Settings` class uses `SettingsConfigDict(env_file=".env")`.
+  Pydantic reads `.env` from the working directory.
+- `docker-compose.yml` uses `env_file: - .env` which injects vars into the
+  container, **and** the app also reads `.env` directly — redundant.
+- `.env` (gitignored) contains: `MONGODB_URL`, `MONGODB_DATABASE`,
+  `LLM7_API_KEY`, `GROQ_API_KEY`.
+- `llm.toml` references `api_key_env = "LLM7_API_KEY"` etc.; `outlines-cascade`
+  reads these via `os.environ.get()` — already environment-based, no change.
+- `.gitignore` already excludes `.env`.
 
 ## Scope
 
-- **In scope:** All 4 Jinja2 templates (`base`, `index`, `raw` + new partials),
-  the FastAPI route handlers in `app.py`, vendoring htmx locally, Dockerfile
-  static file copying.
-- **Out of scope:** The backend repository, processor, scheduler, feed reader,
-  extraction model, and MongoDB logic remain unchanged. No new Python deps
-  beyond removing `datastar-py`.
+- **In scope:** `settings.py`, `docker-compose.yml`, `.env.example`.
+- **Out of scope:** `llm.toml`, `config/` files, application routes, repository,
+  processor, scheduler.
 
-## Architecture
+## Decisions
 
-### Request/response model
-
-| Route | Method | Returns | htmx target |
-|-------|--------|---------|------------|
-| `/` | GET | Full `index.html` page | — |
-| `/raw` | GET | Full `raw.html` page | — |
-| `/search` | GET | HTML fragment: processed cards | `#results` |
-| `/search-raw` | GET | HTML fragment: raw table rows | `#results` |
-| `/reprocess` | POST | Sets `processing=True`, returns 204 (no content) | swaps button to spinner state |
-| `/processing-status` | GET | HTML fragment: spinner + counts or just counts | `#stats` |
-| `/health` | GET | JSON `{"status":"ok"}` | — |
-
-### Filter mechanism
-
-- Each `<select multiple>` has `name="topic"` etc. and
-  `hx-get="/search" hx-trigger="change" hx-target="#results"`.
-- `hx-include="closest form"` bundles ALL filter values on every change.
-- All filters wrapped in a single `<form>` so `hx-include` collects everything.
-- FastAPI receives `topic: list[str] = Query(default=[])` — repeated query
-  params become a list automatically.
-- A small hint text under each multi-select: "Hold Ctrl/Cmd to select multiple".
-
-### Processing flag + spinner
-
-- A module-level `_processing = False` flag in `app.py`.
-- `ProcessingPoller.process_once()` and `process_all_pending()` set it `True`
-  at start, `False` at end (wrap in try/finally).
-- `/reprocess` (POST): sets flag True, kicks off
-  `asyncio.create_task(_proc_poller.process_all_pending())`, returns 204.
-- `#stats` div has `hx-get="/processing-status" hx-trigger="every 2s"` — polls
-  the flag. When True, response includes spinner + current counts. When False,
-  response includes counts only and htmx `hx-swap-oob` stops showing spinner.
-- The reprocess button: `hx-post="/reprocess" hx-target="#stats"` so clicking
-  it swaps `#stats` into spinner state immediately.
-
-### Static file serving
-
-- Vendor `htmx.min.js` (v2.x) into `templates/static/htmx.min.js`.
-- Add `app.mount("/static", StaticFiles(directory=TEMPLATES_DIR / "static"))`
-  in `app.py`.
-- `base.html` loads `<script src="/static/htmx.min.js"></script>`.
+- **Four env vars templated:** `MONGODB_URL`, `MONGODB_DATABASE`,
+  `LLM7_API_KEY`, `GROQ_API_KEY`. No MongoDB auth credentials (user/password)
+  — cloud deploys point `MONGODB_URL` at a managed instance.
+- **`docker-compose.yml` keeps `env_file: - .env`** — this is the bridge for
+  local dev. The app itself no longer reads `.env`; Docker Compose injects
+  the vars into the container environment. For cloud deployments, operators
+  replace `env_file` with `environment:` placeholders or a secrets manager.
+- **Template `docker-compose.yml` for cloud**: add an `environment:` block
+  with placeholder values, commented out, so operators know exactly which
+  vars to set.
 
 ## Files to modify
 
-### 1. `pyproject.toml`
-- Remove `"datastar-py>=0.4.0"` from dependencies.
-- Run `uv lock` to regenerate `uv.lock`.
+### 1. `src/congiuntura_live/settings.py`
 
-### 2. `src/congiuntura_live/app.py`
-- Remove `datastar_py` imports.
-- Add `from starlette.staticfiles import StaticFiles`.
-- Add `app.mount("/static", StaticFiles(...))` after `app` creation.
-- Add module-level `_processing: bool = False`.
-- Rewrite `/search`: accept `topic`, `country`, `sentiment`, `publisher` as
-  `list[str]` query params, `date_from`/`date_to` as `str`. Return Jinja2
-  rendered fragment (not SSE).
-- Rewrite `/search-raw`: same pattern.
-- Add `POST /reprocess`: set flag, create background task, return 204.
-- Add `GET /processing-status`: render `#stats` partial with flag + counts.
-- Remove `_render_processed_fragment` / `_render_raw_fragment` string builders
-  (move HTML to Jinja2 partials).
-- Update `ProcessingPoller` to set/clear `_processing` flag (import from app or
-  pass a callback). Preferred: add a `set_processing_flag` callable parameter
-  to `ProcessingPoller.__init__`.
+Change the `Settings` class to NOT read `.env`:
 
-### 3. `src/congiuntura_live/scheduler.py`
-- `ProcessingPoller.__init__` gets optional `on_processing_change: Callable[[bool], None]`.
-- `process_once()` and `process_all_pending()` call it True at start, False in
-  finally block.
+```python
+class Settings(BaseSettings):
+    """Secrets and connection strings — loaded from environment variables."""
 
-### 4. Templates (full rewrite)
+    model_config = SettingsConfigDict(extra="ignore")
 
-#### `templates/base.html`
-- Replace Datastar SDK `<script>` with `<script src="/static/htmx.min.js">`.
-- Keep Pico CSS, all existing `<style>` blocks.
-- Add `hx-boost` on `<body>` for smooth page transitions.
+    mongodb_url: str = "mongodb://localhost:27017"
+    mongodb_database: str = "congiuntura"
+```
 
-#### `templates/index.html`
-- Wrap filters in `<form id="filter-form" hx-include="this">`.
-- Each `<select multiple name="X">`:
-  `hx-get="/search" hx-trigger="change" hx-target="#results" hx-swap="innerHTML"`.
-- Date inputs same pattern.
-- Reprocess button: `hx-post="/reprocess" hx-target="#stats"`.
-- `#stats` div: `hx-get="/processing-status" hx-trigger="every 2s"`.
-- `#results` div: initial state "Loading…", loaded via
-  `hx-get="/search" hx-trigger="load"`.
+Remove `env_file=".env"` and `env_file_encoding="utf-8"`. Pydantic
+`BaseSettings` reads from `os.environ` by default — no `env_file` means it
+only uses environment variables, which is exactly what we want.
 
-#### `templates/raw.html`
-- Same pattern, targets `/search-raw`.
-- Single-select publisher (no multi-select needed on raw page).
+### 2. `docker-compose.yml`
 
-#### `templates/_processed_cards.html` (NEW)
-- Jinja2 partial: iterates `results`, renders `<article class="card">` blocks.
-- Receives `results` list from `/search` handler.
+Replace `env_file: - .env` with explicit `environment:` placeholders:
 
-#### `templates/_raw_rows.html` (NEW)
-- Jinja2 partial: iterates `results`, renders `<tr>` rows.
+```yaml
+  app:
+    build: .
+    container_name: congiuntura-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DATABASE=congiuntura
+      # LLM API keys — set these for your deployment
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+    volumes:
+      - ./config:/app/config:ro
+      - ./templates:/app/templates:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+```
 
-#### `templates/_stats.html` (NEW)
-- Jinja2 partial: renders counts + optional spinner.
-- Receives `processing: bool`, `processed_count: int`, `raw_count: int`.
+Key changes:
+- `MONGODB_URL` and `MONGODB_DATABASE` have working defaults (point at the
+  compose `mongo` service).
+- `LLM7_API_KEY` and `GROQ_API_KEY` use `${VAR:-}` syntax — Docker Compose
+  interpolates from the host environment or `.env` file (Compose reads `.env`
+  automatically for variable substitution). Empty default prevents crash if
+  unset.
+- **No `env_file` directive** — all vars are explicit.
 
-### 5. `templates/static/htmx.min.js` (NEW)
-- Download htmx v2.0.x minified from unpkg.
+### 3. `.env.example`
 
-### 6. `Dockerfile`
-- No change needed — `templates/` is already copied (line 13, 30), which now
-  includes `static/` subdirectory.
+Update to document all four variables and match the new provider set:
 
-## Validation plan
+```env
+# ─── Environment variables (read by the app via os.environ) ───
+# For local dev, copy this to .env — Docker Compose reads .env for
+# ${VAR} substitution in docker-compose.yml.
 
-1. `docker compose up -d --build` — app starts without import errors.
-2. `curl localhost:8000/` — full HTML page loads, htmx script tag present.
-3. `curl localhost:8000/search?topic=GDP` — returns HTML fragment with cards.
-4. `curl localhost:8000/search?topic=GDP&topic=Construction` — multi-value works.
-5. Headless Chromium: load `/`, verify 200 articles in `#results`.
-6. Headless Chromium: change topic select, verify `#results` updates via htmx.
-7. Headless Chromium: click reprocess, verify spinner appears in `#stats`.
-8. `curl localhost:8000/static/htmx.min.js` — static file served correctly.
+# MongoDB connection
+MONGODB_URL=mongodb://mongo:27017
+MONGODB_DATABASE=congiuntura
 
-## Risks
+# LLM backend API keys (used by outlines-cascade via llm.toml providers)
+LLM7_API_KEY=your-llm7-key-here
+GROQ_API_KEY=your-groq-key-here
+```
 
-- **htmx `change` trigger on `<select multiple>`**: htmx fires on every option
-  toggle (each Ctrl+click). May cause rapid requests. Mitigation: add
-  `hx-trigger="change delay:200ms"` to debounce.
-- **Background task without awaiting**: `asyncio.create_task` in a FastAPI
-  sync-ish context may need careful handling. Mitigation: ensure the route is
-  `async def` and the task is fire-and-forget (the flag protects against
-  concurrent reprocessing).
-- **Processing flag race**: if background poller and manual button overlap.
-  Mitigation: flag is a simple boolean; both set True/False, final state
-  converges to False when all work done. Worst case: spinner flickers.
+## Validation
+
+1. `docker compose down && docker compose up -d --build` — app starts.
+2. `curl localhost:8000/health` — returns OK.
+3. `docker compose exec app env | grep MONGODB_URL` — env var present in container.
+4. Check logs for "LLM processing enabled" — API keys reached outlines-cascade.
+5. Confirm the app does NOT have a `.env` file mounted or copied into the
+   container (it never was — Docker Compose injects via `environment:`).

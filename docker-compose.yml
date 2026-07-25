@@ -21,8 +21,12 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DATABASE=congiuntura
+      # LLM API keys — set these for your deployment
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
     volumes:
       # Mount config and templates so changes don't require a rebuild
       - ./config:/app/config:ro

@@ -6,11 +6,12 @@
 # and cascades for structured generation.
 #
 # API keys are NEVER stored here — only the environment variable name
-# (api_key_env). Put the actual key in your .env file:
-#   OPENROUTER_API_KEY=sk-or-v1-...
+# (api_key_env). Set the actual keys as environment variables; for local
+# Docker Compose runs, put them in a .env file (Compose substitutes them):
+#   LLM7_API_KEY=...
+#   GROQ_API_KEY=...
 #
-# The primary provider is Groq (cloud), which gives access to
-# many models via an OpenAI-compatible API.
+# Both providers are cloud, OpenAI-compatible endpoints (Groq and LLM7).
 
 # ─── Providers ───────────────────────────────────────────────
 
