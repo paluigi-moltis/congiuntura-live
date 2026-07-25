@@ -26,18 +26,19 @@ class LLMExtraction(BaseModel):
         "Export prices",
         "GDP",
         "Industrial production",
+        "Services production",
         "International trade",
         "Labour market",
         "Public finance",
         "Retail trade",
         "Construction",
         "Business surveys",
-        "Other",
-    ] = Field(description="Primary economic topic of the press release")
+        "Other economic topics",
+        "Non-economic topics",
+    ] = Field(description="Primary topic of the press release")
 
     country: Literal[
         "Euro area",
-        "European Union",
         "Italy",
         "Spain",
         "France",
@@ -52,12 +53,12 @@ class LLMExtraction(BaseModel):
     ] = Field(description="Economic sentiment conveyed by the data")
 
     summary_en: str = Field(
-        description="Concise English summary of the press release (2-3 sentences)"
+        description="Concise English summary of the press release (max 150 words)"
     )
 
     key_figures: str = Field(
         description=(
             "Key numerical figures mentioned: rates, percentages, index values, "
-            "growth rates. Comma-separated."
+            "growth rates. Semi-colon-separated. (max 100 characters)"
         )
     )

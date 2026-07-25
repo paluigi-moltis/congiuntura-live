@@ -20,7 +20,7 @@ enabled = true
 # outlines-cascade config file (providers + cascades).
 llm_config = "config/llm.toml"
 # Which cascade to use (defined in llm_config).
-cascade_name = "conjuncture"
+cascade_name = "congiuntura"
 # How often to poll for unprocessed releases (minutes).
 interval_minutes = 2
 # Max chars of scraped content to send to the LLM (avoids token explosion).

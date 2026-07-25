@@ -6,14 +6,14 @@ WORKDIR /app
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# Copy project files
-COPY pyproject.toml uv.lock* ./
+# Copy project files (README.md is required by hatchling: pyproject.toml references it)
+COPY pyproject.toml uv.lock* README.md ./
 COPY src/ src/
 COPY config/ config/
 COPY templates/ templates/
 
 # Install dependencies (no editable, production build)
-RUN uv sync --frozen --no-dev 2>/dev/null || uv sync --no-dev
+RUN uv sync --frozen --no-dev || uv sync --no-dev
 
 # ── Stage 2: runtime ────────────────────────────────────────
 FROM python:3.12-slim

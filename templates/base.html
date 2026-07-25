@@ -20,9 +20,15 @@
         }
         .search-bar label { margin-bottom: 0; flex: 1; min-width: 140px; }
         .search-bar select, .search-bar input { margin-bottom: 0; }
+        .search-bar .hint { font-size: 0.7rem; color: var(--muted-color); display: block; margin-top: 0.2rem; }
         .reprocess-btn { margin-bottom: 0; white-space: nowrap; }
-        .reprocess-btn:disabled { opacity: 0.5; }
-        .stats { font-size: 0.85rem; color: var(--muted-color); margin-bottom: 0.5rem; }
+        .reprocess-btn:disabled { opacity: 0.5; cursor: wait; }
+        .stats {
+            font-size: 0.85rem; color: var(--muted-color); margin-bottom: 0.5rem;
+            display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+        }
+        .spinner { font-weight: 600; color: var(--primary); }
+        .flash { padding: 0.3rem 0.6rem; background: #e8f5e9; border-radius: 4px; font-size: 0.85rem; }
         .badge {
             display: inline-block; padding: 0.15rem 0.5rem;
             border-radius: 4px; font-size: 0.8rem; font-weight: 600;
@@ -35,7 +41,6 @@
         .badge.insee { background: #000091; }
         .badge.destatis { background: #444; }
         .empty { text-align: center; color: var(--muted-color); padding: 2rem; }
-        .flash { padding: 1rem; background: #e8f5e9; border-radius: 4px; margin-bottom: 1rem; }
 
         /* ── Processed cards ── */
         .card {
@@ -66,7 +71,7 @@
         footer { text-align: center; margin-top: 3rem; color: var(--muted-color); font-size: 0.8rem; }
     </style>
 </head>
-<body>
+<body hx-boost>
     <header>
         <div>
             <h1>📊 Congiuntura Live</h1>
@@ -84,7 +89,7 @@
         <p>Congiuntura Live · <a href="https://github.com/paluigi-moltis/congiuntura-live">GitHub</a></p>
     </footer>
 
-    <!-- Datastar SDK -->
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.1/bundles/datastar.js"></script>
+    <!-- htmx (vendored, zero-build) -->
+    <script src="/static/htmx.min.js"></script>
 </body>
 </html>

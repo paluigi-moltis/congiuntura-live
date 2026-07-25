@@ -2,72 +2,74 @@
 {% block nav_main %}active{% endblock %}
 {% block content %}
 
-<!-- Datastar reactive signals -->
-<script type="module">
-    ds.signal('publisher', 'all');
-    ds.signal('date_from', '');
-    ds.signal('date_to', '');
-    ds.signal('topic', 'all');
-    ds.signal('country', 'all');
-    ds.signal('sentiment', 'all');
-    ds.signal('summary_en', '');
-    ds.signal('key_figures', '');
-</script>
-
-<div class="search-bar" data-signals data-on-load="@get('/search')">
+<!-- Filter form: all selects live here so hx-include="closest form" collects all values -->
+<form id="filter-form" class="search-bar">
 
     <label>
         Publisher
-        <select data-bind="publisher" data-on-change="@get('/search')">
-            <option value="all">All agencies</option>
+        <select name="publisher" multiple size="5"
+                hx-get="/search"
+                hx-trigger="change delay:200ms"
+                hx-target="#results"
+                hx-include="closest form"
+                hx-swap="innerHTML">
             {% for slug, name in publishers %}
             <option value="{{ slug }}">{{ name }}</option>
             {% endfor %}
         </select>
+        <span class="hint">Hold Ctrl/Cmd to select multiple</span>
     </label>
 
     {% for filter in filters %}
-    {% if filter.type == 'select' %}
     <label>
         {{ filter.name | replace('_', ' ') | capitalize }}
-        <select data-bind="{{ filter.name }}" data-on-change="@get('/search')">
-            <option value="all">All</option>
+        <select name="{{ filter.name }}" multiple size="5"
+                hx-get="/search"
+                hx-trigger="change delay:200ms"
+                hx-target="#results"
+                hx-include="closest form"
+                hx-swap="innerHTML">
             {% for choice in filter.choices %}
             <option value="{{ choice }}">{{ choice }}</option>
             {% endfor %}
         </select>
+        <span class="hint">Hold Ctrl/Cmd to select multiple</span>
     </label>
-    {% elif filter.type == 'text' %}
-    <label>
-        {{ filter.name | replace('_', ' ') | capitalize }}
-        <input type="text" placeholder="Search {{ filter.name | replace('_', ' ') }}"
-               data-bind="{{ filter.name }}"
-               data-on-input="@get('/search')">
-    </label>
-    {% endif %}
     {% endfor %}
 
     <label>
         From
-        <input type="date" data-bind="date_from" data-on-change="@get('/search')">
+        <input type="date" name="date_from"
+               hx-get="/search"
+               hx-trigger="change"
+               hx-target="#results"
+               hx-include="closest form"
+               hx-swap="innerHTML">
     </label>
 
     <label>
         To
-        <input type="date" data-bind="date_to" data-on-change="@get('/search')">
+        <input type="date" name="date_to"
+               hx-get="/search"
+               hx-trigger="change"
+               hx-target="#results"
+               hx-include="closest form"
+               hx-swap="innerHTML">
     </label>
 
-    <button data-on-click="@get('/reprocess')" class="reprocess-btn"
+    <button type="button"
+            class="reprocess-btn"
+            hx-post="/reprocess"
+            hx-target="#stats"
+            hx-swap="outerHTML"
             {% if not processing_enabled %}disabled title="Processing not enabled"{% endif %}>
         ♻ Reprocess pending
     </button>
-</div>
+</form>
 
-<div class="stats">
-    <span>{{ total }} processed · {{ total_raw }} raw feeds</span>
-</div>
+{% include "_stats.html" with context %}
 
-<div id="results" data-indicator>
+<div id="results" hx-get="/search" hx-trigger="load" hx-swap="innerHTML">
     <p class="empty">Loading…</p>
 </div>
 
