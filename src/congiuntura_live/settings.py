@@ -1,4 +1,4 @@
-"""Application configuration loaded from TOML files and .env."""
+"""Application configuration loaded from TOML files and environment variables."""
 
 from __future__ import annotations
 
@@ -9,17 +9,13 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# ─── Secrets from .env ─────────────────────────────────────────
+# ─── Secrets from environment ─────────────────────────────────
 
 
 class Settings(BaseSettings):
-    """Secrets and connection strings — loaded from .env."""
+    """Secrets and connection strings — loaded from environment variables."""
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
+    model_config = SettingsConfigDict(extra="ignore")
 
     mongodb_url: str = "mongodb://localhost:27017"
     mongodb_database: str = "congiuntura"

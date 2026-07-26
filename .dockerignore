@@ -1,0 +1,41 @@
+# Secrets / local env — NEVER send to builder
+.env
+.env.*
+!.env.example
+
+# VCS / metadata
+.git/
+.gitignore
+
+# Python caches & local virtualenvs
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Tests & coverage (not needed at runtime)
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Tooling caches / IDE
+.ruff_cache/
+.vscode/
+.idea/
+.kilo/
+*.swp
+*.swo
+
+# Docker / docs (not consumed by the image build)
+Dockerfile*
+docker-compose*.yml
+PLAN.md
+
+# OS
+.DS_Store
+Thumbs.db

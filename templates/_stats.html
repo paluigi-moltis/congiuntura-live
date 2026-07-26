@@ -2,12 +2,8 @@
       hx-get="/processing-status"
       hx-trigger="every 2s"
       hx-swap="outerHTML"
-      class="stats">
-    <span>{{ processed_count }} processed · {{ raw_count }} raw feeds</span>
-    {% if processing %}
-        <span class="spinner">⏳ Processing…</span>
-    {% endif %}
-    {% if reprocess_msg %}
-        <span class="flash">{{ reprocess_msg }}</span>
-    {% endif %}
+      class="stats-inline">
+    Feeds: {{ raw_count }} raw — {{ processed_count }} processed
+    {% if processing %}<span class="spinner">⏳ Processing…</span>{% endif %}
+    {% if reprocess_msg %}<span class="flash">{{ reprocess_msg }}</span>{% endif %}
 </span>
