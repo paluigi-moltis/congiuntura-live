@@ -29,7 +29,7 @@ and serves a searchable web interface with live updates via HTMX.
   LLM extracts; the web UI auto-generates filter controls from the model
 - **Cloud LLM backends** — Groq + LLM7 (both OpenAI-compatible), with cascade failover
 - **Incremental processing** — only processes raw items not yet in the processed collection
-- **Auto-generated filter UI** — dropdowns for Literal fields, text search for str fields
+- **Auto-generated filter UI** — selectors for Literal fields, calendar input for date fields
 
 ---
 
@@ -38,7 +38,7 @@ and serves a searchable web interface with live updates via HTMX.
 ### Prerequisites
 
 - Docker and Docker Compose
-- API keys for **Groq** ([console.groq.com](https://console.groq.com)) and/or **LLM7**
+- API keys for **Groq** ([console.groq.com](https://console.groq.com)) and/or **LLM7** and/or the LLM API provider of your choice
 
 ### 1. Clone
 
@@ -64,12 +64,16 @@ service, so you only need to set the LLM keys to enable processing. See
 
 ### 3. Run with Docker Compose
 
+Docker Compose pulls the prebuilt multi-arch image
+(`paluigi/congiuntura-live:0.3.0`, `linux/amd64` + `linux/arm64`) from Docker Hub —
+no local build required:
+
 ```bash
 docker compose up -d
 ```
 
 - **Web interface:** http://localhost:8000
-- **MongoDB:** port 27017 (data persisted to named volume)
+- **MongoDB:** reachable as `mongo:27017` inside the compose network (not published to the host; data persisted to named volume)
 
 ### 4. Verify
 
@@ -346,8 +350,9 @@ congiuntura-live/
 │   ├── test_config.py           # Config loading tests
 │   ├── test_extraction_model.py # Model loading + introspection tests
 │   └── test_scraper.py          # Scraper fallback + live extraction tests
+├── .dockerignore                # Excludes .env/.git/.venv from the build context
 ├── Dockerfile                   # Multi-stage build
-├── docker-compose.yml           # App + MongoDB
+├── docker-compose.yml           # Pulls paluigi/congiuntura-live + MongoDB
 ├── pyproject.toml
 ├── PLAN.md
 └── README.md
@@ -363,10 +368,13 @@ MIT © Luigi Palumbo
 
 ## Change Log
 
-- **Unreleased**: Secrets now read from environment variables (was `.env` via Pydantic
+- **0.3.0**: Secrets now read from environment variables (was `.env` via Pydantic
   `env_file`); Docker Compose injects them via an explicit `environment:` block. Removed
   `.env.example`. Frontend migrated from Datastar/SSE to HTMX. LLM backends switched from
-  OpenRouter to Groq + LLM7 (outlines-cascade cascade `congiuntura`).
+  OpenRouter to Groq + LLM7 (outlines-cascade cascade `congiuntura`). Multi-arch Docker
+  image (`paluigi/congiuntura-live`, `linux/amd64` + `linux/arm64`) published to Docker Hub;
+  Compose now pulls the image instead of building. Added `.dockerignore` to keep secrets
+  and dev artifacts out of the build context.
 - **0.2.0** (2025-07-21): LLM processing via outlines-cascade. Structured extraction
   (topic, country, sentiment, EN summary, key figures). Anti-hallucination two-model
   architecture. trafilatura scraping. Auto-generated filter UI. OpenRouter backend.

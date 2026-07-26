@@ -4,8 +4,6 @@ services:
     image: mongo:7
     container_name: congiuntura-mongo
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -16,7 +14,7 @@ services:
 
   # ─── Application ───────────────────────────────────────────
   app:
-    build: .
+    image: paluigi/congiuntura-live:0.3.0
     container_name: congiuntura-app
     restart: unless-stopped
     ports:
