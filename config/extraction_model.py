@@ -43,6 +43,7 @@ class LLMExtraction(BaseModel):
         "Spain",
         "France",
         "Germany",
+        "Ireland",
         "Other",
     ] = Field(description="Geographic scope of the data")
 

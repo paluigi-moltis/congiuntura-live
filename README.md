@@ -3,7 +3,7 @@
 **Aggregator and LLM processor of RSS feeds from European official statistics agencies.**
 
 Monitors press releases from **Eurostat**, **Istat**, **INE** (Spain), **INSEE** (France),
-and **Destatis** (Germany), deduplicates them, stores them in MongoDB, processes them
+**Destatis** (Germany), and **CSO** (Ireland), deduplicates them, stores them in MongoDB, processes them
 with structured LLM extraction via [outlines-cascade](https://pypi.org/project/outlines-cascade/),
 and serves a searchable web interface with live updates via HTMX.
 
@@ -13,7 +13,7 @@ and serves a searchable web interface with live updates via HTMX.
 
 ### Phase 1 — Feed aggregation (complete)
 
-- **5 statistical agencies** monitored (11 feeds, ~300+ releases)
+- **6 statistical agencies** monitored (12 feeds, ~300+ releases)
 - **Automatic deduplication** via SHA-256 URL hashing
 - **Configurable polling** — default 5 minutes
 - **Flexible feed configuration** — edit `config/feeds.toml` without touching code
@@ -43,7 +43,7 @@ and serves a searchable web interface with live updates via HTMX.
 ### 1. Clone
 
 ```bash
-git clone https://github.com/paluigi-moltis/congiuntura-live.git
+git clone https://github.com/paluigi/congiuntura-live.git
 cd congiuntura-live
 ```
 
@@ -65,7 +65,7 @@ service, so you only need to set the LLM keys to enable processing. See
 ### 3. Run with Docker Compose
 
 Docker Compose pulls the prebuilt multi-arch image
-(`paluigi/congiuntura-live:0.3.0`, `linux/amd64` + `linux/arm64`) from Docker Hub —
+(`paluigi/congiuntura-live:0.4.0`, `linux/amd64` + `linux/arm64`) from Docker Hub —
 no local build required:
 
 ```bash
@@ -368,6 +368,9 @@ MIT © Luigi Palumbo
 
 ## Change Log
 
+- **0.4.0**: Added CSO (Ireland) as 6th monitored agency; added `Ireland` to the
+  extraction-model `country` choices; added `.badge.cso` (teal `#008080`); fixed footer,
+  README clone URL, and user-agent strings (`paluigi-moltis` → `paluigi`).
 - **0.3.0**: Secrets now read from environment variables (was `.env` via Pydantic
   `env_file`); Docker Compose injects them via an explicit `environment:` block. Removed
   `.env.example`. Frontend migrated from Datastar/SSE to HTMX. LLM backends switched from

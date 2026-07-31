@@ -9,7 +9,7 @@ import trafilatura
 
 logger = logging.getLogger(__name__)
 
-_SCRAPER_USER_AGENT = "congiuntura-live/0.1 (+https://github.com/paluigi-moltis/congiuntura-live)"
+_SCRAPER_USER_AGENT = "congiuntura-live/0.1 (+https://github.com/paluigi/congiuntura-live)"
 
 
 class PressReleaseScraper:

@@ -24,8 +24,8 @@ class TestAppConfig:
 class TestFeedsConfig:
     def test_load_all_agencies(self):
         feeds = load_feeds_config("config/feeds.toml")
-        assert len(feeds) == 5
-        assert set(feeds.keys()) == {"eurostat", "istat", "ine", "insee", "destatis"}
+        assert len(feeds) == 6
+        assert set(feeds.keys()) == {"eurostat", "istat", "ine", "insee", "destatis", "cso"}
 
     def test_agency_fields(self):
         feeds = load_feeds_config("config/feeds.toml")
@@ -51,3 +51,11 @@ class TestFeedsConfig:
         feeds = load_feeds_config("config/feeds.toml")
         for feed in feeds["insee"].feeds:
             assert "/en/flux/" in feed.url, "INSEE should use English flux URLs"
+
+    def test_cso_config(self):
+        feeds = load_feeds_config("config/feeds.toml")
+        cso = feeds["cso"]
+        assert cso.name == "CSO"
+        assert cso.language == "en"
+        assert len(cso.feeds) >= 1
+        assert feeds["cso"].feeds[0].url.startswith("https://")
