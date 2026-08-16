@@ -30,22 +30,28 @@ class FeedPoller:
         reader: FeedReader,
         repo: PressReleaseRepository,
         feeds_config_path: str = "config/feeds.toml",
+        status_repo=None,
+        on_update=None,
     ) -> None:
         self._reader = reader
         self._repo = repo
         self._feeds_config_path = feeds_config_path
+        self._status_repo = status_repo
+        self._on_update = on_update
         self._scheduler = AsyncIOScheduler()
 
     async def poll_once(self) -> int:
         """Run a single poll cycle across all agencies. Returns count of new inserts."""
         agencies = load_feeds_config(self._feeds_config_path)
         total_new = 0
+        errors = 0
 
         for slug, agency in agencies.items():
             try:
                 fetched = await self._reader.fetch_agency(slug, agency)
             except Exception:
                 logger.exception("Error fetching agency %s", slug)
+                errors += 1
                 continue
 
             releases: list[PressRelease] = []
@@ -69,6 +75,23 @@ class FeedPoller:
             total_new += inserted
 
         logger.info("Poll cycle complete: %d new releases", total_new)
+
+        # Record last-run status and push to connected clients
+        if self._status_repo is not None:
+            try:
+                await self._status_repo.mark(
+                    "press_releases",
+                    status="ok" if errors == 0 else "partial",
+                    details=f"{total_new} new releases"
+                    + (f", {errors} agency errors" if errors else ""),
+                )
+            except Exception:
+                logger.exception("Failed to mark press-release status")
+        if self._on_update is not None:
+            try:
+                self._on_update()
+            except Exception:
+                logger.exception("on_update callback failed")
         return total_new
 
     def start(self, interval_minutes: int) -> None:

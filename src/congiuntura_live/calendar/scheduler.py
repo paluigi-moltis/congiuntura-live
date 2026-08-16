@@ -24,14 +24,18 @@ class CalendarPoller:
     scrape window is never touched.
     """
 
-    def __init__(self, repo: CalendarRepository, config: CalendarConfig | None = None) -> None:
+    def __init__(self, repo: CalendarRepository, config: CalendarConfig | None = None,
+                 status_repo=None, on_update=None) -> None:
         self._repo = repo
         self._config = config or CalendarConfig()
+        self._status_repo = status_repo
+        self._on_update = on_update
         self._scheduler = AsyncIOScheduler()
 
     async def collect_once(self) -> dict[str, int]:
         """Run all collectors once. Returns per-source counts."""
         counts: dict[str, int] = {}
+        errors = 0
 
         for collector_cls in NSO_COLLECTORS:
             collector = collector_cls()
@@ -40,6 +44,7 @@ class CalendarPoller:
                 counts[collector.source_code()] = await self._repo.upsert_nso(records)
             except Exception:
                 logger.exception("Calendar collector %s failed", collector.source_code())
+                errors += 1
 
         try:
             ff = ForexFactoryCollector()
@@ -47,8 +52,27 @@ class CalendarPoller:
             counts["forexfactory"] = await self._repo.upsert_ff(records)
         except Exception:
             logger.exception("ForexFactory collector failed")
+            errors += 1
 
         logger.info("Calendar collection cycle complete: %s", counts)
+
+        # Record last-run status and push to connected clients
+        if self._status_repo is not None:
+            try:
+                total = sum(counts.values())
+                await self._status_repo.mark(
+                    "calendar",
+                    status="ok" if errors == 0 else "partial",
+                    details=f"{total} releases"
+                    + (f", {errors} collector errors" if errors else ""),
+                )
+            except Exception:
+                logger.exception("Failed to mark calendar status")
+        if self._on_update is not None:
+            try:
+                self._on_update()
+            except Exception:
+                logger.exception("on_update callback failed")
         return counts
 
     async def backfill_ff(self) -> int:

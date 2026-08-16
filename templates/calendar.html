@@ -7,6 +7,9 @@
 <h2>📅 Release Calendar</h2>
 <p class="subtitle">Scheduled data releases from NSOs and ForexFactory (EUR)</p>
 
+{% set which = "calendar" %}
+{% include "_last_update.html" %}
+
 <div class="search-bar" style="grid-template-columns: 1fr 1fr 1fr 2fr;">
     <form id="calendar-form"
           hx-get="/calendar/search"

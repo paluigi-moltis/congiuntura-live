@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -21,6 +21,8 @@ from .processor import ReleaseProcessor
 from .repository import PressReleaseRepository
 from .scheduler import FeedPoller, ProcessingPoller
 from .settings import Settings, load_app_config, load_extraction_model, load_feeds_config
+from .update_status import KEY_CALENDAR, KEY_PRESSES, UpdateStatusRepository
+from .ws_hub import update_hub
 from .calendar import CalendarPoller, CalendarRepository
 from .calendar.config import load_calendar_config
 
@@ -38,6 +40,7 @@ _proc_poller: ProcessingPoller | None = None
 _extraction_model_class = None
 _calendar_repo: CalendarRepository | None = None
 _calendar_poller: CalendarPoller | None = None
+_status_repo: UpdateStatusRepository | None = None
 
 # Module-level processing reference counter, incremented by ProcessingPoller
 # and the manual reprocess button.  Polled by the htmx /processing-status endpoint.
@@ -56,6 +59,18 @@ def _processing_inc() -> None:
 def _processing_dec() -> None:
     global _processing_refs
     _processing_refs = max(0, _processing_refs - 1)
+
+
+def _format_status(doc: dict[str, Any] | None) -> dict[str, Any]:
+    """Serialize an update_status document for templates/WS payloads."""
+    if not doc:
+        return {"last_run": None, "status": "never", "details": ""}
+    last_run = doc.get("last_run")
+    return {
+        "last_run": last_run.strftime("%Y-%m-%d %H:%M UTC") if last_run else None,
+        "status": doc.get("status", ""),
+        "details": doc.get("details", ""),
+    }
 
 
 async def _initial_calendar_backfill() -> None:
@@ -82,7 +97,7 @@ async def _initial_calendar_backfill() -> None:
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
     global _repo, _reader, _poller, _processor, _proc_poller, _extraction_model_class
-    global _calendar_repo, _calendar_poller
+    global _calendar_repo, _calendar_poller, _status_repo
 
     settings = Settings()
     app_cfg = load_app_config()
@@ -95,18 +110,45 @@ async def lifespan(app: FastAPI):
     _repo = PressReleaseRepository(settings.mongodb_url, settings.mongodb_database)
     await _repo.ensure_indexes()
 
+    # Last-update tracker (helper collection) + WebSocket broadcast on change
+    _status_repo = UpdateStatusRepository(settings.mongodb_url, settings.mongodb_database)
+
+    async def _broadcast_update_status() -> None:
+        """Push the latest last-run timestamps to all connected clients."""
+        if _status_repo is None:
+            return
+        try:
+            statuses = await _status_repo.get_all()
+            await update_hub.broadcast({
+                "type": "update_status",
+                "press_releases": _format_status(statuses.get(KEY_PRESSES)),
+                "calendar": _format_status(statuses.get(KEY_CALENDAR)),
+            })
+        except Exception:
+            logger.exception("Failed to broadcast update status")
+
+    _reader = FeedReader()
+    _poller = FeedPoller(
+        _reader,
+        _repo,
+        status_repo=_status_repo,
+        on_update=lambda: asyncio.create_task(_broadcast_update_status()),
+    )
+    _poller.start(interval_minutes=app_cfg.polling.interval_minutes)
+
     # Release calendar (NSO + ForexFactory) — same MongoDB database.
     calendar_cfg = load_calendar_config()
     _calendar_repo = CalendarRepository(settings.mongodb_url, settings.mongodb_database)
     await _calendar_repo.ensure_indexes()
-    _calendar_poller = CalendarPoller(_calendar_repo, calendar_cfg)
+    _calendar_poller = CalendarPoller(
+        _calendar_repo,
+        calendar_cfg,
+        status_repo=_status_repo,
+        on_update=lambda: asyncio.create_task(_broadcast_update_status()),
+    )
     _calendar_poller.start()
     # First-run backfill: populate the calendar if collections are empty
     asyncio.create_task(_initial_calendar_backfill())
-
-    _reader = FeedReader()
-    _poller = FeedPoller(_reader, _repo)
-    _poller.start(interval_minutes=app_cfg.polling.interval_minutes)
 
     # Load extraction model for UI introspection
     _extraction_model_class = load_extraction_model(app_cfg.processing.model_path)
@@ -142,6 +184,8 @@ async def lifespan(app: FastAPI):
         _calendar_poller.stop()
     if _calendar_repo:
         await _calendar_repo.close()
+    if _status_repo:
+        await _status_repo.close()
     if _proc_poller:
         await _proc_poller.stop()
     if _poller:
@@ -151,7 +195,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application stopped")
 
 
-app = FastAPI(title="Congiuntura Live", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="Congiuntura Live", version="0.5.1", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Serve vendored static assets (htmx.min.js etc.)
@@ -252,6 +296,7 @@ async def index(request: Request):
     processed_count = await repo.count_total_processed()
     raw_count = await repo.count_total_raw()
     filters = _build_filter_definitions()
+    ctx = await _update_status_context()
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -262,6 +307,7 @@ async def index(request: Request):
             "raw_count": raw_count,
             "filters": filters,
             "processing_enabled": _processor is not None,
+            **ctx,
         },
     )
 
@@ -273,6 +319,7 @@ async def raw(request: Request):
     publishers = [(slug, cfg.name) for slug, cfg in feeds_cfg.items()]
     repo = _get_repo()
     total = await repo.count_total_raw()
+    ctx = await _update_status_context()
     return templates.TemplateResponse(
         request,
         "raw.html",
@@ -280,6 +327,7 @@ async def raw(request: Request):
             "request": request,
             "publishers": publishers,
             "total": total,
+            **ctx,
         },
     )
 
@@ -477,6 +525,7 @@ async def calendar_page(request: Request):
     default_from = today.replace(day=1).isoformat()
     default_to = _cal.monthrange(today.year, today.month)[1]
     default_to = today.replace(day=default_to).isoformat()
+    ctx = await _update_status_context()
     return templates.TemplateResponse(
         request,
         "calendar.html",
@@ -485,6 +534,7 @@ async def calendar_page(request: Request):
             "sources": sources,
             "default_date_from": default_from,
             "default_date_to": default_to,
+            **ctx,
         },
     )
 
@@ -541,3 +591,38 @@ async def calendar_search(
             "now": now_naive,
         },
     )
+
+
+# ── WebSocket + update-status indicator ─────────────────────
+
+
+def _get_status_repo() -> UpdateStatusRepository:
+    if _status_repo is None:
+        raise RuntimeError("Status repository not initialized")
+    return _status_repo
+
+
+async def _update_status_context() -> dict[str, Any]:
+    """Context for the last-update indicators rendered on each page."""
+    repo = _get_status_repo()
+    statuses = await repo.get_all()
+    return {
+        "press_status": _format_status(statuses.get(KEY_PRESSES)),
+        "calendar_status": _format_status(statuses.get(KEY_CALENDAR)),
+    }
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(ws: WebSocket):
+    """Push channel for live update-status changes (and future events)."""
+    try:
+        await update_hub.connect(ws)
+        while True:
+            # Client pings keep the socket alive; anything received is ignored
+            await ws.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("WebSocket endpoint error")
+    finally:
+        await update_hub.disconnect(ws)

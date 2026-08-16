@@ -48,6 +48,16 @@ and serves a searchable web interface with live updates via HTMX.
   as values are published
 - **Pure scraping** — calendar records are never touched by any LLM
 
+### Live update indicators (new in 0.5.1)
+
+- **"Last update" badge** on every page (home, raw feeds, calendar), upper-left
+  above the filters — server-rendered on load, then kept live via WebSocket
+- **`update_status` helper collection** in MongoDB records each pipeline's last
+  run (timestamp, ok/partial status, details); updated by the feed poller
+  (every 5 min) and the calendar cron (daily 07:00 UTC)
+- **`/ws` WebSocket endpoint** pushes status changes to all connected clients
+  the moment a run completes — no polling; auto-reconnects on drop
+
 ---
 
 ## Quick Start
@@ -385,6 +395,12 @@ MIT © Luigi Palumbo
 
 ## Change Log
 
+- **0.5.1**: Live "last update" indicators on all three pages (home, raw feeds,
+  calendar) — `update_status` helper MongoDB collection tracks each pipeline's
+  last run (feed poller ~5 min, calendar cron daily 07:00 UTC); `/ws` WebSocket
+  endpoint broadcasts status changes to connected clients instantly, with a
+  vanilla-JS auto-reconnecting client in the base template. Fixed WebSocket
+  handshake 403 by handling `WebSocketDisconnect` explicitly.
 - **0.5.0**: English title translations (`title_en`) on processed press releases —
   extracted alongside the other LLM fields for new items, backfilled at startup for
   existing ones (title-only calls, no re-scraping); card UI shows the original title

@@ -2,6 +2,9 @@
 {% block nav_raw %}active{% endblock %}
 {% block content %}
 
+{% set which = "press" %}
+{% include "_last_update.html" %}
+
 <form id="filter-form" class="search-bar">
     <label>
         Publisher

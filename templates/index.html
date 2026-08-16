@@ -2,6 +2,9 @@
 {% block nav_main %}active{% endblock %}
 {% block content %}
 
+{% set which = "press" %}
+{% include "_last_update.html" %}
+
 <form id="filter-form" class="search-bar">
     <div class="filter-hint" style="flex-basis: 100%; margin-bottom: 0;">
         Hold Ctrl/Cmd to select multiple items in the filters below.
