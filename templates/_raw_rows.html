@@ -1,0 +1,22 @@
+{% if not results %}
+    <p class="empty">No raw releases found.</p>
+{% else %}
+    <table>
+        {% for r in results %}
+        {% set publisher = r.publisher_full or r.publisher %}
+        {% set publisher_slug = r.publisher %}
+        {% set summary = (r.summary or '')[:200] %}
+        {% set safe_url = r.url if r.url and r.url.startswith(('http://', 'https://')) else '#' %}
+        <tr>
+            <td><span class="badge {{ publisher_slug }}">{{ publisher }}</span></td>
+            <td>{{ r.published | format_date }}</td>
+            <td>
+                <a href="{{ safe_url }}" target="_blank" rel="noopener noreferrer">{{ r.title }}</a>
+                <div class="feed-label">{{ r.feed_label }}</div>
+                <div class="summary">{{ summary }}</div>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+{% endif %}
+<span id="retrieved-count" hx-swap-oob="true">{{ retrieved_count }} retrieved</span>

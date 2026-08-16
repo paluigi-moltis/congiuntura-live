@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -102,12 +103,19 @@ class ProcessingPoller:
         repo: PressReleaseRepository,
         interval_minutes: int = 2,
         batch_size: int = 20,
+        on_processing_change: Callable[[bool], None] | None = None,
     ) -> None:
         self._processor = processor
         self._repo = repo
         self._interval = interval_minutes
         self._batch_size = batch_size
+        self._on_processing_change = on_processing_change
         self._scheduler = AsyncIOScheduler()
+
+    def _signal_processing(self, active: bool) -> None:
+        """Notify the UI layer that processing started/stopped."""
+        if self._on_processing_change is not None:
+            self._on_processing_change(active)
 
     async def process_once(self) -> int:
         """Process a batch of unprocessed releases. Returns count processed."""
@@ -115,38 +123,46 @@ class ProcessingPoller:
         if not unprocessed:
             return 0
 
-        processed_count = 0
-        for raw_doc in unprocessed:
-            try:
-                result = await self._processor.process_one(raw_doc)
-                if result:
-                    inserted = await self._repo.insert_processed(result)
-                    if inserted:
-                        processed_count += 1
-            except Exception:
-                logger.exception("Error processing %s", raw_doc.get("url_hash", "unknown"))
-
-        logger.info("Processing cycle: %d releases processed", processed_count)
-        return processed_count
-
-    async def process_all_pending(self) -> int:
-        """Process ALL pending items (used by the manual 'Reprocess' button)."""
-        total = 0
-        while True:
-            batch = await self._repo.find_unprocessed(limit=self._batch_size)
-            if not batch:
-                break
-            for raw_doc in batch:
+        self._signal_processing(True)
+        try:
+            processed_count = 0
+            for raw_doc in unprocessed:
                 try:
                     result = await self._processor.process_one(raw_doc)
                     if result:
                         inserted = await self._repo.insert_processed(result)
                         if inserted:
-                            total += 1
+                            processed_count += 1
                 except Exception:
                     logger.exception("Error processing %s", raw_doc.get("url_hash", "unknown"))
-        logger.info("Batch processing: %d releases processed", total)
-        return total
+
+            logger.info("Processing cycle: %d releases processed", processed_count)
+            return processed_count
+        finally:
+            self._signal_processing(False)
+
+    async def process_all_pending(self) -> int:
+        """Process ALL pending items (used by the manual 'Reprocess' button)."""
+        self._signal_processing(True)
+        try:
+            total = 0
+            while True:
+                batch = await self._repo.find_unprocessed(limit=self._batch_size)
+                if not batch:
+                    break
+                for raw_doc in batch:
+                    try:
+                        result = await self._processor.process_one(raw_doc)
+                        if result:
+                            inserted = await self._repo.insert_processed(result)
+                            if inserted:
+                                total += 1
+                    except Exception:
+                        logger.exception("Error processing %s", raw_doc.get("url_hash", "unknown"))
+            logger.info("Batch processing: %d releases processed", total)
+            return total
+        finally:
+            self._signal_processing(False)
 
     def start(self) -> None:
         """Start the periodic processing scheduler."""

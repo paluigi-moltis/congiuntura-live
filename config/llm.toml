@@ -6,27 +6,38 @@
 # and cascades for structured generation.
 #
 # API keys are NEVER stored here — only the environment variable name
-# (api_key_env). Put the actual key in your .env file:
-#   OPENROUTER_API_KEY=sk-or-v1-...
+# (api_key_env). Set the actual keys as environment variables; for local
+# Docker Compose runs, put them in a .env file (Compose substitutes them):
+#   LLM7_API_KEY=...
+#   GROQ_API_KEY=...
 #
-# The primary provider is OpenRouter (cloud), which gives access to
-# many models via an OpenAI-compatible API.
+# Both providers are cloud, OpenAI-compatible endpoints (Groq and LLM7).
 
 # ─── Providers ───────────────────────────────────────────────
 
-[providers.openrouter]
+[providers.llm7]
 type = "openai"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"
+base_url = "https://api.llm7.io/v1"
+api_key_env = "LLM7_API_KEY"
 
-[providers.ollama]
-type = "ollama"
+[providers.groq]
+type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
 
 # ─── Cascades ────────────────────────────────────────────────
 # Tried in order: if the first fails, the next is attempted.
 
-[cascades.conjuncture]
+[cascades.congiuntura]
 entries = [
-    { provider = "openrouter", model = "meta-llama/llama-3.3-70b-instruct" },
-    { provider = "ollama", model = "llama3.1" },
+    
+    { provider = "groq", model = "openai/gpt-oss-120b" },
+    { provider = "llm7", model = "gpt-5.4-mini" },
+    { provider = "groq", model = "qwen/qwen3.6-27b" },
+    { provider = "llm7", model = "kimi-k3" },
+    { provider = "llm7", model = "deepseek-ai/deepseek-v4-flash" },
+    { provider = "groq", model = "openai/gpt-oss-20b" },
+    { provider = "llm7", model = "deepseek-v4-flash" },
+    { provider = "llm7", model = "minimax-m2.7" },
+    { provider = "llm7", model = "gpt-oss:20b" },
 ]

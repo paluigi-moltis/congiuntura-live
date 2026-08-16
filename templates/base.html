@@ -1,50 +1,78 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Congiuntura Live</title>
-    <!-- Pico CSS (classless, zero-build) -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/css@2/pico.min.css">
+    <link rel="stylesheet" href="/static/pico.min.css">
+    <script>
+        // Apply saved theme before render to avoid flash
+        (function () {
+            var t = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', t);
+        })();
+    </script>
     <style>
         body { max-width: 1200px; margin: 0 auto; padding: 1rem 1.5rem; }
         header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 0; }
         header h1 { margin-bottom: 0; }
-        header .subtitle { color: var(--muted-color); font-size: 0.9rem; }
-        nav a { margin-left: 1rem; text-decoration: none; }
-        nav a.active { font-weight: bold; text-decoration: underline; }
+        header .subtitle { font-size: 0.9rem; opacity: 0.7; }
+        nav { display: flex; gap: 0.25rem; align-items: center; }
+        nav a {
+            text-decoration: none; padding: 0.35rem 0.85rem;
+            border-radius: 20px; font-size: 0.9rem; font-weight: 500;
+            border: 1px solid var(--pico-muted-border-color, #ced4da);
+            color: inherit; transition: background 0.15s, border-color 0.15s;
+        }
+        nav a:hover { background: var(--pico-secondary-background, #e9ecef); }
+        nav a.active {
+            background: var(--pico-primary, #0d6efd); color: #fff;
+            border-color: var(--pico-primary, #0d6efd);
+        }
+
         .search-bar {
-            display: flex; gap: 1rem; align-items: flex-end; flex-wrap: wrap;
-            padding: 1rem; background: var(--card-background-color);
-            border-radius: 8px; margin-bottom: 1.5rem;
+            display: flex; gap: 1rem; align-items: flex-start; flex-wrap: wrap;
+            padding: 1rem; border-radius: 8px; margin-bottom: 1rem;
+            border: 1px solid var(--pico-muted-border-color, #ced4da);
         }
         .search-bar label { margin-bottom: 0; flex: 1; min-width: 140px; }
         .search-bar select, .search-bar input { margin-bottom: 0; }
+        .filter-hint { font-size: 0.75rem; opacity: 0.6; margin-bottom: 0.5rem; }
+        .btn-sm { padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
         .reprocess-btn { margin-bottom: 0; white-space: nowrap; }
-        .reprocess-btn:disabled { opacity: 0.5; }
-        .stats { font-size: 0.85rem; color: var(--muted-color); margin-bottom: 0.5rem; }
+        .reprocess-btn:disabled { opacity: 0.5; cursor: wait; }
+
+        .stats {
+            font-size: 0.85rem; opacity: 0.7; margin-bottom: 0.5rem;
+            display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+        }
+        .stats-inline { display: inline-flex; gap: 1rem; align-items: center; }
+        #retrieved-count { font-weight: 600; }
+        .spinner { font-weight: 600; color: var(--pico-primary, #0d6efd); }
+        .flash { padding: 0.3rem 0.6rem; background: #e8f5e9; border-radius: 4px; font-size: 0.85rem; }
+
         .badge {
             display: inline-block; padding: 0.15rem 0.5rem;
             border-radius: 4px; font-size: 0.8rem; font-weight: 600;
-            background: var(--primary); color: var(--primary-inverse);
-            white-space: nowrap;
+            color: #fff; white-space: nowrap; background: var(--pico-primary, #0d6efd);
         }
         .badge.eurostat { background: #0064c8; }
         .badge.istat { background: #005e4a; }
         .badge.ine { background: #c8102e; }
         .badge.insee { background: #000091; }
         .badge.destatis { background: #444; }
-        .empty { text-align: center; color: var(--muted-color); padding: 2rem; }
-        .flash { padding: 1rem; background: #e8f5e9; border-radius: 4px; margin-bottom: 1rem; }
+        .badge.cso { background: #008080; }
+        .empty { text-align: center; opacity: 0.5; padding: 2rem; }
 
         /* ── Processed cards ── */
         .card {
-            border: 1px solid var(--table-border-color); border-radius: 8px;
-            padding: 1rem; margin-bottom: 1rem; background: var(--card-background-color);
+            border: 1px solid var(--pico-muted-border-color, #ced4da); border-radius: 8px;
+            padding: 1rem; margin-bottom: 1rem;
         }
         .card-header { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
         .card-header .topic { font-weight: 600; }
-        .card-header .country { color: var(--muted-color); font-size: 0.9rem; }
+        .card-header .country { opacity: 0.7; font-size: 0.9rem; }
         .card-header .sentiment { font-size: 0.8rem; font-weight: 600; padding: 0.1rem 0.4rem; border-radius: 3px; }
         .sentiment-positive { background: #d4edda; color: #155724; }
         .sentiment-negative { background: #f8d7da; color: #721c24; }
@@ -52,39 +80,59 @@
         .card h3 { margin: 0.3rem 0; font-size: 1.05rem; }
         .card h3 a { text-decoration: none; }
         .summary-en { font-size: 0.95rem; margin: 0.3rem 0; }
-        .key-figures { font-size: 0.85rem; color: var(--muted-color); margin: 0.3rem 0; font-family: monospace; }
-        .card-footer { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--muted-color); margin-top: 0.5rem; }
+        .key-figures { font-size: 0.85rem; opacity: 0.7; margin: 0.3rem 0; font-family: monospace; }
+        .card-footer { display: flex; gap: 1rem; font-size: 0.8rem; opacity: 0.7; margin-top: 0.5rem; }
         .card-footer .model { margin-left: auto; }
 
         /* ── Raw table ── */
         #results table { width: 100%; }
         #results td { vertical-align: top; padding: 0.75rem 0.5rem; }
-        #results tr { border-bottom: 1px solid var(--table-border-color); }
-        .feed-label { font-size: 0.75rem; color: var(--muted-color); margin-top: 0.2rem; }
-        .summary { font-size: 0.85rem; color: var(--muted-color); margin-top: 0.3rem; }
+        #results tr { border-bottom: 1px solid var(--pico-muted-border-color, #ced4da); }
+        .feed-label { font-size: 0.75rem; opacity: 0.7; margin-top: 0.2rem; }
+        .summary { font-size: 0.85rem; opacity: 0.7; margin-top: 0.3rem; }
 
-        footer { text-align: center; margin-top: 3rem; color: var(--muted-color); font-size: 0.8rem; }
+        footer { text-align: center; margin-top: 3rem; opacity: 0.5; font-size: 0.8rem; }
+
+        /* Theme toggle */
+        .theme-toggle {
+            background: none; border: 1px solid var(--pico-muted-border-color, #ced4da);
+            border-radius: 8px; padding: 0.3rem 0.6rem; cursor: pointer; font-size: 1.1rem;
+            line-height: 1; opacity: 0.8;
+        }
+        .theme-toggle:hover { opacity: 1; }
     </style>
 </head>
-<body>
+<body hx-boost>
     <header>
         <div>
             <h1>📊 Congiuntura Live</h1>
-            <div class="subtitle">European statistics press releases — Eurostat · Istat · INE · INSEE · Destatis</div>
+            <div class="subtitle">European statistics press releases — Eurostat · Istat · INE · INSEE · Destatis · CSO</div>
         </div>
-        <nav>
-            <a href="/" class="{% block nav_main %}{% endblock %}">Processed</a>
-            <a href="/raw" class="{% block nav_raw %}{% endblock %}">Raw feeds</a>
-        </nav>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <nav>
+                <a href="/" class="{% block nav_main %}{% endblock %}">Home</a>
+                <a href="/raw" class="{% block nav_raw %}{% endblock %}">Raw feeds</a>
+            </nav>
+            <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light">🌓</button>
+        </div>
     </header>
 
     {% block content %}{% endblock %}
 
     <footer>
-        <p>Congiuntura Live · <a href="https://github.com/paluigi-moltis/congiuntura-live">GitHub</a></p>
+        <p>Congiuntura Live · <a href="https://github.com/paluigi/congiuntura-live">GitHub</a></p>
     </footer>
 
-    <!-- Datastar SDK -->
-    <script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.1/bundles/datastar.js"></script>
+    <!-- htmx (vendored) -->
+    <script src="/static/htmx.min.js"></script>
+    <script>
+        function toggleTheme() {
+            var html = document.documentElement;
+            var current = html.getAttribute('data-theme');
+            var next = current === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        }
+    </script>
 </body>
 </html>

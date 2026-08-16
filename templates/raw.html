@@ -2,17 +2,15 @@
 {% block nav_raw %}active{% endblock %}
 {% block content %}
 
-<script type="module">
-    ds.signal('publisher', 'all');
-    ds.signal('date_from', '');
-    ds.signal('date_to', '');
-</script>
-
-<div class="search-bar" data-signals data-on-load="@get('/search-raw')">
-
+<form id="filter-form" class="search-bar">
     <label>
         Publisher
-        <select data-bind="publisher" data-on-change="@get('/search-raw')">
+        <select name="publisher"
+                hx-get="/search-raw"
+                hx-trigger="change"
+                hx-target="#results"
+                hx-include="closest form"
+                hx-swap="innerHTML">
             <option value="all">All agencies</option>
             {% for slug, name in publishers %}
             <option value="{{ slug }}">{{ name }}</option>
@@ -22,23 +20,37 @@
 
     <label>
         From
-        <input type="date" data-bind="date_from" data-on-change="@get('/search-raw')">
+        <input type="date" name="date_from"
+               hx-get="/search-raw"
+               hx-trigger="change"
+               hx-target="#results"
+               hx-include="closest form"
+               hx-swap="innerHTML">
     </label>
 
     <label>
         To
-        <input type="date" data-bind="date_to" data-on-change="@get('/search-raw')">
+        <input type="date" name="date_to"
+               hx-get="/search-raw"
+               hx-trigger="change"
+               hx-target="#results"
+               hx-include="closest form"
+               hx-swap="innerHTML">
     </label>
-</div>
+
+    <button type="button" class="btn-sm outline"
+            style="margin-bottom: 0;"
+            onclick="document.querySelectorAll('#filter-form select, #filter-form input').forEach(function(el) { if (el.tagName==='SELECT') el.selectedIndex=0; else el.value=''; }); htmx.trigger('#filter-form select[name=publisher]', 'change');">
+        ✕ Clear filters
+    </button>
+</form>
 
 <div class="stats">
-    <span>{{ total }} raw releases in database</span>
+    <span>Feeds: {{ total }} raw — <span id="retrieved-count">{{ total }} retrieved</span></span>
 </div>
 
-<div id="results" data-indicator>
-    <table>
-        <tr><td colspan="3" class="empty">Loading…</td></tr>
-    </table>
+<div id="results" hx-get="/search-raw" hx-trigger="load" hx-swap="innerHTML">
+    <p class="empty">Loading…</p>
 </div>
 
 {% endblock %}

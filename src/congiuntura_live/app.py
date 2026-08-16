@@ -1,18 +1,20 @@
-"""FastAPI application with Datastar-powered search interface."""
+"""FastAPI application with htmx-powered search interface."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, get_args, get_origin
 
-from datastar_py import ServerSentEventGenerator as SSE
-from datastar_py.fastapi import datastar_response, read_signals
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
+from starlette.responses import Response
 
 from .feed_reader import FeedReader
 from .processor import ReleaseProcessor
@@ -32,6 +34,24 @@ _poller: FeedPoller | None = None
 _processor: ReleaseProcessor | None = None
 _proc_poller: ProcessingPoller | None = None
 _extraction_model_class = None
+
+# Module-level processing reference counter, incremented by ProcessingPoller
+# and the manual reprocess button.  Polled by the htmx /processing-status endpoint.
+_processing_refs: int = 0
+
+
+def _is_processing() -> bool:
+    return _processing_refs > 0
+
+
+def _processing_inc() -> None:
+    global _processing_refs
+    _processing_refs += 1
+
+
+def _processing_dec() -> None:
+    global _processing_refs
+    _processing_refs = max(0, _processing_refs - 1)
 
 
 @asynccontextmanager
@@ -62,7 +82,10 @@ async def lifespan(app: FastAPI):
         try:
             _processor = ReleaseProcessor(app_cfg.processing)
             _proc_poller = ProcessingPoller(
-                _processor, _repo, interval_minutes=app_cfg.processing.interval_minutes
+                _processor,
+                _repo,
+                interval_minutes=app_cfg.processing.interval_minutes,
+                on_processing_change=lambda active: _processing_inc() if active else _processing_dec(),
             )
             _proc_poller.start()
             logger.info("LLM processing enabled — cascade '%s'", app_cfg.processing.cascade_name)
@@ -83,8 +106,11 @@ async def lifespan(app: FastAPI):
     logger.info("Application stopped")
 
 
-app = FastAPI(title="Congiuntura Live", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Congiuntura Live", version="0.4.0", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# Serve vendored static assets (htmx.min.js etc.)
+app.mount("/static", StaticFiles(directory=str(TEMPLATES_DIR / "static")), name="static")
 
 
 def _get_repo() -> PressReleaseRepository:
@@ -93,13 +119,30 @@ def _get_repo() -> PressReleaseRepository:
     return _repo
 
 
+# ── Template filters ────────────────────────────────────────
+
+
+def _format_date(pub_date: Any) -> str:
+    if not pub_date:
+        return ""
+    try:
+        dt = datetime.fromisoformat(pub_date) if isinstance(pub_date, str) else pub_date
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return str(pub_date)[:16]
+
+
+templates.env.filters["format_date"] = _format_date
+
+
 # ── Model introspection for auto-generated filters ──────────
 
 
 def _build_filter_definitions() -> list[dict[str, Any]]:
     """Introspect the LLMExtraction model to build UI filter definitions.
 
-    Literal types → dropdown, str → text search, etc.
+    Only Literal types become dropdown filters.  ``str`` fields
+    (summary_en, key_figures) are excluded — they are display-only.
     """
     if _extraction_model_class is None:
         return []
@@ -110,12 +153,10 @@ def _build_filter_definitions() -> list[dict[str, Any]]:
         if origin is not None and hasattr(origin, "__name__") and origin.__name__ == "Literal":
             choices = list(get_args(annotation))
             filters.append({"name": name, "type": "select", "choices": choices})
-        elif annotation is str:
-            filters.append({"name": name, "type": "text"})
     return filters
 
 
-# ── Main page: processed releases ───────────────────────────
+# ── Full page routes ────────────────────────────────────────
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -124,8 +165,8 @@ async def index(request: Request):
     feeds_cfg = load_feeds_config()
     publishers = [(slug, cfg.name) for slug, cfg in feeds_cfg.items()]
     repo = _get_repo()
-    total = await repo.count_total_processed()
-    total_raw = await repo.count_total_raw()
+    processed_count = await repo.count_total_processed()
+    raw_count = await repo.count_total_raw()
     filters = _build_filter_definitions()
     return templates.TemplateResponse(
         request,
@@ -133,15 +174,12 @@ async def index(request: Request):
         {
             "request": request,
             "publishers": publishers,
-            "total": total,
-            "total_raw": total_raw,
+            "processed_count": processed_count,
+            "raw_count": raw_count,
             "filters": filters,
             "processing_enabled": _processor is not None,
         },
     )
-
-
-# ── Raw feeds page (secondary) ──────────────────────────────
 
 
 @app.get("/raw", response_class=HTMLResponse)
@@ -170,178 +208,148 @@ async def health():
 # ── Date parsing helper ─────────────────────────────────────
 
 
-def _parse_date_signal(raw: str | None) -> datetime | None:
+def _parse_date(raw: str | None) -> str | None:
+    """Parse a ``YYYY-MM-DD`` date picker value into an ISO 8601 string.
+
+    The ``published`` field is stored as an ISO 8601 string in MongoDB,
+    so date-range filters must also be strings for correct comparison.
+    """
     if not raw:
         return None
     try:
-        return datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=UTC)
+        return datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=UTC).isoformat()
     except ValueError:
         return None
 
 
-# ── Datastar SSE: processed search ──────────────────────────
+# ── htmx fragment routes ────────────────────────────────────
 
 
-@app.get("/search")
-@datastar_response
-async def search(request: Request):
-    """Datastar SSE endpoint: filters and streams processed results."""
-    sig_data = await read_signals(request) or {}
+@app.get("/search", response_class=HTMLResponse)
+async def search(
+    request: Request,
+    publisher: list[str] = Query(default=[]),
+    topic: list[str] = Query(default=[]),
+    country: list[str] = Query(default=[]),
+    sentiment: list[str] = Query(default=[]),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+):
+    """htmx endpoint: filter processed releases, return card fragment.
+
+    The response includes an out-of-band swap that updates the
+    ``#retrieved-count`` element with the number of filtered results.
+    """
     repo = _get_repo()
-
     filters: dict[str, Any] = {}
-    for key in ("publisher", "topic", "country", "sentiment"):
-        val = sig_data.get(key, "all")
-        if val and val != "all":
-            filters[key] = val
-    for key in ("summary_en", "key_figures"):
-        val = sig_data.get(key, "")
-        if val:
-            filters[key] = val
-    filters["date_from"] = _parse_date_signal(sig_data.get("date_from"))
-    filters["date_to"] = _parse_date_signal(sig_data.get("date_to"))
+    for key, vals in (("publisher", publisher), ("topic", topic), ("country", country), ("sentiment", sentiment)):
+        if vals:
+            filters[key] = vals
+    filters["date_from"] = _parse_date(date_from)
+    filters["date_to"] = _parse_date(date_to)
 
     results = await repo.search_processed(filters=filters, limit=200)
-    html = _render_processed_fragment(results)
-    yield SSE.patch_elements(html)
-
-
-# ── Datastar SSE: raw search ────────────────────────────────
-
-
-@app.get("/search-raw")
-@datastar_response
-async def search_raw(request: Request):
-    """Datastar SSE endpoint: filters and streams raw results."""
-    sig_data = await read_signals(request) or {}
-    repo = _get_repo()
-
-    publisher = sig_data.get("publisher", "all")
-    date_from = _parse_date_signal(sig_data.get("date_from"))
-    date_to = _parse_date_signal(sig_data.get("date_to"))
-
-    results = await repo.search_raw(
-        publisher=publisher, date_from=date_from, date_to=date_to, limit=200
+    total_matching = await repo.count_processed(filters=filters)
+    return templates.TemplateResponse(
+        request,
+        "_processed_cards.html",
+        {"request": request, "results": results, "retrieved_count": total_matching},
     )
-    html = _render_raw_fragment(results)
-    yield SSE.patch_elements(html)
 
 
-# ── Reprocess endpoint ──────────────────────────────────────
+@app.get("/search-raw", response_class=HTMLResponse)
+async def search_raw(
+    request: Request,
+    publisher: str = Query(default="all"),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+):
+    """htmx endpoint: filter raw releases, return table fragment."""
+    repo = _get_repo()
+    parsed_from = _parse_date(date_from)
+    parsed_to = _parse_date(date_to)
+    results = await repo.search_raw(
+        publisher=publisher,
+        date_from=parsed_from,
+        date_to=parsed_to,
+        limit=200,
+    )
+    total_matching = await repo.count_raw(
+        publisher=publisher, date_from=parsed_from, date_to=parsed_to
+    )
+    return templates.TemplateResponse(
+        request,
+        "_raw_rows.html",
+        {"request": request, "results": results, "retrieved_count": total_matching},
+    )
 
 
-@app.get("/reprocess")
-@datastar_response
+# ── Reprocess + processing status ───────────────────────────
+
+
+@app.post("/reprocess")
 async def reprocess(request: Request):
-    """Trigger incremental batch processing of all unprocessed items.
+    """Kick off manual reprocessing as a background task.
 
-    Processes only items present in raw but NOT in processed collection.
+    Sets the processing flag immediately (so the spinner shows), then
+    runs the full pending queue.  The flag is cleared when done.
     """
     if _proc_poller is None:
-        yield SSE.patch_elements(
-            '<div id="results"><p class="empty">Processing is not enabled.</p></div>'
-        )
-        return
-
-    count = await _proc_poller.process_all_pending()
-    html = f'<div id="reprocess-status" class="flash">' f"Processed {count} new releases." "</div>"
-    yield SSE.patch_elements(html)
-
-
-# ── HTML fragment renderers ─────────────────────────────────
-
-
-def _escape(text: str) -> str:
-    import html as html_mod
-
-    return html_mod.escape(str(text))
-
-
-def _format_date(pub_date) -> str:
-    if not pub_date:
-        return ""
-    try:
-        dt = datetime.fromisoformat(pub_date) if isinstance(pub_date, str) else pub_date
-        return dt.strftime("%Y-%m-%d %H:%M")
-    except (ValueError, TypeError):
-        return str(pub_date)[:16]
-
-
-def _render_processed_fragment(results: list[dict[str, Any]]) -> str:
-    """Render processed release cards as an HTML fragment."""
-    cards: list[str] = []
-    for r in results:
-        publisher = r.get("publisher_full", r.get("publisher", ""))
-        publisher_slug = r.get("publisher", "")
-        date_str = _format_date(r.get("published"))
-        title = _escape(r.get("title", ""))
-        url = _escape(r.get("url", "#"))
-        topic = _escape(r.get("topic", ""))
-        country = _escape(r.get("country", ""))
-        sentiment = _escape(r.get("sentiment", ""))
-        summary_en = _escape(r.get("summary_en", ""))
-        key_figures = _escape(r.get("key_figures", ""))
-        model = _escape(r.get("processing_model", ""))
-        feed_label = _escape(r.get("feed_label", ""))
-
-        sentiment_class = {
-            "positive": "sentiment-positive",
-            "negative": "sentiment-negative",
-            "neutral": "sentiment-neutral",
-        }.get(sentiment, "sentiment-neutral")
-
-        cards.append(
-            f'<article class="card">'
-            f'<div class="card-header">'
-            f'<span class="badge {publisher_slug}">{_escape(publisher)}</span>'
-            f'<span class="topic">{topic}</span>'
-            f'<span class="country">{country}</span>'
-            f'<span class="sentiment {sentiment_class}">{sentiment}</span>'
-            f"</div>"
-            f'<h3><a href="{url}" target="_blank">{title}</a></h3>'
-            f'<p class="summary-en">{summary_en}</p>'
-            f'<div class="key-figures">{key_figures}</div>'
-            f'<div class="card-footer">'
-            f'<span class="date">{date_str}</span>'
-            f'<span class="feed-label">{feed_label}</span>'
-            f'<span class="model">🤖 {model}</span>'
-            f"</div>"
-            f"</article>"
+        return Response(
+            content='<span id="reprocess-status" class="flash">Processing is not enabled.</span>',
+            media_type="text/html",
+            status_code=200,
         )
 
-    if not cards:
-        body = '<p class="empty">No processed releases found.</p>'
-    else:
-        body = "\n".join(cards)
-
-    return f'<div id="results">{body}</div>'
-
-
-def _render_raw_fragment(results: list[dict[str, Any]]) -> str:
-    """Render raw release rows as an HTML fragment."""
-    rows: list[str] = []
-    for r in results:
-        date_str = _format_date(r.get("published"))
-        title = _escape(r.get("title", ""))
-        url = _escape(r.get("url", "#"))
-        publisher = _escape(r.get("publisher_full", r.get("publisher", "")))
-        publisher_slug = r.get("publisher", "")
-        feed_label = _escape(r.get("feed_label", ""))
-        summary = _escape((r.get("summary") or "")[:200])
-
-        rows.append(
-            "<tr>"
-            f'<td><span class="badge {publisher_slug}">{publisher}</span></td>'
-            f"<td>{date_str}</td>"
-            f'<td><a href="{url}" target="_blank">{title}</a>'
-            f'<div class="feed-label">{feed_label}</div>'
-            f'<div class="summary">{summary}</div></td>'
-            "</tr>"
+    if _is_processing():
+        return Response(
+            content='<span id="reprocess-status" class="flash">Already processing — please wait.</span>',
+            media_type="text/html",
+            status_code=200,
         )
 
-    if not rows:
-        body = '<tr><td colspan="3" class="empty">No results found.</td></tr>'
-    else:
-        body = "\n".join(rows)
+    async def _run():
+        _processing_inc()
+        try:
+            await _proc_poller.process_all_pending()
+        except Exception:
+            logger.exception("Background reprocess failed")
+        finally:
+            _processing_dec()
 
-    return f'<div id="results"><table>{body}</table></div>'
+    background = BackgroundTask(_run)
+
+    return templates.TemplateResponse(
+        request,
+        "_stats.html",
+        {
+            "request": request,
+            "processing": True,
+            "processed_count": await _get_repo().count_total_processed(),
+            "raw_count": await _get_repo().count_total_raw(),
+            "reprocess_msg": "Processing started…",
+        },
+        background=background,
+    )
+
+
+@app.get("/processing-status", response_class=HTMLResponse)
+async def processing_status(request: Request):
+    """Return the stats bar fragment (polled by htmx every 2s).
+
+    Includes a spinner when processing is active.
+    """
+    repo = _get_repo()
+    processed_count, raw_count = await asyncio.gather(
+        repo.count_total_processed(), repo.count_total_raw()
+    )
+    return templates.TemplateResponse(
+        request,
+        "_stats.html",
+        {
+            "request": request,
+            "processing": _is_processing(),
+            "processed_count": processed_count,
+            "raw_count": raw_count,
+        },
+    )

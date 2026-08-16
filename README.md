@@ -3,9 +3,9 @@
 **Aggregator and LLM processor of RSS feeds from European official statistics agencies.**
 
 Monitors press releases from **Eurostat**, **Istat**, **INE** (Spain), **INSEE** (France),
-and **Destatis** (Germany), deduplicates them, stores them in MongoDB, processes them
+**Destatis** (Germany), and **CSO** (Ireland), deduplicates them, stores them in MongoDB, processes them
 with structured LLM extraction via [outlines-cascade](https://pypi.org/project/outlines-cascade/),
-and serves a searchable web interface with real-time updates via Datastar SSE.
+and serves a searchable web interface with live updates via HTMX.
 
 ---
 
@@ -13,7 +13,7 @@ and serves a searchable web interface with real-time updates via Datastar SSE.
 
 ### Phase 1 — Feed aggregation (complete)
 
-- **5 statistical agencies** monitored (11 feeds, ~300+ releases)
+- **6 statistical agencies** monitored (12 feeds, ~300+ releases)
 - **Automatic deduplication** via SHA-256 URL hashing
 - **Configurable polling** — default 5 minutes
 - **Flexible feed configuration** — edit `config/feeds.toml` without touching code
@@ -27,9 +27,9 @@ and serves a searchable web interface with real-time updates via Datastar SSE.
 - **Content scraping** — trafilatura extracts the full press release text for richer LLM input
 - **Configurable extraction model** — edit `config/extraction_model.py` to change what the
   LLM extracts; the web UI auto-generates filter controls from the model
-- **Cloud LLM backend** — OpenRouter (OpenAI-compatible) as primary, with cascade failover
+- **Cloud LLM backends** — Groq + LLM7 (both OpenAI-compatible), with cascade failover
 - **Incremental processing** — only processes raw items not yet in the processed collection
-- **Auto-generated filter UI** — dropdowns for Literal fields, text search for str fields
+- **Auto-generated filter UI** — selectors for Literal fields, calendar input for date fields
 
 ---
 
@@ -38,32 +38,42 @@ and serves a searchable web interface with real-time updates via Datastar SSE.
 ### Prerequisites
 
 - Docker and Docker Compose
-- An OpenRouter API key (free tier available at [openrouter.ai](https://openrouter.ai))
+- API keys for **Groq** ([console.groq.com](https://console.groq.com)) and/or **LLM7** and/or the LLM API provider of your choice
 
-### 1. Clone and configure
+### 1. Clone
 
 ```bash
-git clone https://github.com/paluigi-moltis/congiuntura-live.git
+git clone https://github.com/paluigi/congiuntura-live.git
 cd congiuntura-live
-cp .env.example .env
 ```
 
-### 2. Set your API key
+### 2. Set your API keys
 
-Edit `.env` and add your OpenRouter key:
+The app reads secrets from **environment variables**. For local Docker Compose
+runs, put them in a `.env` file in the project root — Compose reads it
+automatically and substitutes the values into the container:
 
 ```env
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
+LLM7_API_KEY=your-llm7-key-here
+GROQ_API_KEY=your-groq-key-here
 ```
 
+`MONGODB_URL` and `MONGODB_DATABASE` already default to the compose `mongo`
+service, so you only need to set the LLM keys to enable processing. See
+[Configuration](#configuration) for the full variable list.
+
 ### 3. Run with Docker Compose
+
+Docker Compose pulls the prebuilt multi-arch image
+(`paluigi/congiuntura-live:0.4.0`, `linux/amd64` + `linux/arm64`) from Docker Hub —
+no local build required:
 
 ```bash
 docker compose up -d
 ```
 
 - **Web interface:** http://localhost:8000
-- **MongoDB:** port 27017 (data persisted to named volume)
+- **MongoDB:** reachable as `mongo:27017` inside the compose network (not published to the host; data persisted to named volume)
 
 ### 4. Verify
 
@@ -84,10 +94,14 @@ curl http://localhost:8000/health
 | `config/feeds.toml` | RSS feed URLs per agency | ✅ | ❌ |
 | `config/extraction_model.py` | Pydantic model for LLM extraction | ✅ | ❌ |
 | `config/llm.toml` | outlines-cascade providers + cascades | ✅ | ❌ |
-| `.env` | Secrets (MongoDB URL, API keys) | ❌ | ✅ |
+| `.env` (local only) | Secrets for Docker Compose `${VAR}` substitution | ❌ | ✅ |
 
-**API keys are NEVER in TOML files** — only the environment variable name
-(`api_key_env`). The actual key goes in `.env`.
+**Secrets are read from environment variables** — the app reads `os.environ`
+directly, never a `.env` file. For local Docker Compose runs, create a `.env`
+(gitignored) and Compose substitutes its values into the container's
+`environment:` block. **API keys are NEVER in TOML files** — `config/llm.toml`
+stores only the variable name (`api_key_env`); the actual key lives in the
+environment.
 
 ### `config/app.toml`
 
@@ -105,7 +119,7 @@ level = "INFO"
 [processing]
 enabled = true
 llm_config = "config/llm.toml"
-cascade_name = "conjuncture"
+cascade_name = "congiuntura"
 interval_minutes = 2
 max_content_chars = 4000
 model_path = "config/extraction_model.py"
@@ -141,24 +155,39 @@ class LLMExtraction(BaseModel):
 ### `config/llm.toml`
 
 ```toml
-[providers.openrouter]
+[providers.llm7]
 type = "openai"
-base_url = "https://openrouter.ai/api/v1"
-api_key_env = "OPENROUTER_API_KEY"   # ← variable name only; key goes in .env
+base_url = "https://api.llm7.io/v1"
+api_key_env = "LLM7_API_KEY"   # ← variable name only; key lives in the environment
 
-[cascades.conjuncture]
+[providers.groq]
+type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key_env = "GROQ_API_KEY"
+
+# Tried in order: if the first fails, the next is attempted.
+[cascades.congiuntura]
 entries = [
-    { provider = "openrouter", model = "meta-llama/llama-3.3-70b-instruct" },
-    { provider = "ollama", model = "llama3.1" },
+    { provider = "groq", model = "openai/gpt-oss-120b" },
+    { provider = "llm7", model = "gpt-5.4-mini" },
+    # …more fallback entries — see config/llm.toml
 ]
 ```
 
-### `.env`
+### Environment variables
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `MONGODB_URL` | MongoDB connection string | `mongodb://localhost:27017` |
+| `MONGODB_DATABASE` | Database name | `congiuntura` |
+| `LLM7_API_KEY` | LLM7 API key (outlines-cascade) | — |
+| `GROQ_API_KEY` | Groq API key (outlines-cascade) | — |
+
+For local Docker Compose, put them in a gitignored `.env`:
 
 ```env
-MONGODB_URL=mongodb://mongo:27017
-MONGODB_DATABASE=congiuntura
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
+LLM7_API_KEY=your-llm7-key-here
+GROQ_API_KEY=your-groq-key-here
 ```
 
 ---
@@ -246,11 +275,11 @@ in the processed collection (incremental, never re-processes existing items).
 |-------|-----------|
 | Language | Python 3.12+ |
 | Web framework | FastAPI |
-| Frontend | Datastar (SSE) + Pico CSS |
+| Frontend | HTMX + Pico CSS |
 | RSS parsing | feedparser |
 | Content scraping | trafilatura |
 | LLM extraction | outlines-cascade (Pydantic structured generation) |
-| LLM backend | OpenRouter (cloud, OpenAI-compatible) |
+| LLM backend | Groq + LLM7 (cloud, OpenAI-compatible) |
 | Database | MongoDB (motor async driver) |
 | Scheduler | APScheduler |
 | Models | Pydantic v2 |
@@ -264,8 +293,10 @@ in the processed collection (incremental, never re-processes existing items).
 
 ```bash
 uv sync --all-extras
-cp .env.example .env
-# Edit .env with your MongoDB URL and OpenRouter key
+# Export secrets into your shell (or a local .env) — the app reads os.environ
+export MONGODB_URL="mongodb://localhost:27017"
+export LLM7_API_KEY="your-llm7-key-here"
+export GROQ_API_KEY="your-groq-key-here"
 ```
 
 ### Run locally
@@ -300,14 +331,14 @@ congiuntura-live/
 │   └── llm.toml                 # outlines-cascade providers + cascades
 ├── src/congiuntura_live/
 │   ├── __init__.py
-│   ├── settings.py              # Config loading (TOML + .env + model loader)
+│   ├── settings.py              # Config loading (TOML + env vars + model loader)
 │   ├── models.py                # PressRelease model
 │   ├── feed_reader.py           # Async RSS/Atom reader
 │   ├── scraper.py               # trafilatura content extraction
 │   ├── processor.py             # outlines-cascade pipeline orchestrator
 │   ├── repository.py            # Async MongoDB repository (raw + processed)
 │   ├── scheduler.py             # FeedPoller + ProcessingPoller (APScheduler)
-│   └── app.py                   # FastAPI app + Datastar routes
+│   └── app.py                   # FastAPI app + HTMX routes
 ├── templates/
 │   ├── base.html                # Layout with nav (Processed / Raw feeds)
 │   ├── index.html               # Main: processed cards + auto-generated filters
@@ -319,10 +350,10 @@ congiuntura-live/
 │   ├── test_config.py           # Config loading tests
 │   ├── test_extraction_model.py # Model loading + introspection tests
 │   └── test_scraper.py          # Scraper fallback + live extraction tests
+├── .dockerignore                # Excludes .env/.git/.venv from the build context
 ├── Dockerfile                   # Multi-stage build
-├── docker-compose.yml           # App + MongoDB
+├── docker-compose.yml           # Pulls paluigi/congiuntura-live + MongoDB
 ├── pyproject.toml
-├── .env.example
 ├── PLAN.md
 └── README.md
 ```
@@ -337,6 +368,16 @@ MIT © Luigi Palumbo
 
 ## Change Log
 
+- **0.4.0**: Added CSO (Ireland) as 6th monitored agency; added `Ireland` to the
+  extraction-model `country` choices; added `.badge.cso` (teal `#008080`); fixed footer,
+  README clone URL, and user-agent strings (`paluigi-moltis` → `paluigi`).
+- **0.3.0**: Secrets now read from environment variables (was `.env` via Pydantic
+  `env_file`); Docker Compose injects them via an explicit `environment:` block. Removed
+  `.env.example`. Frontend migrated from Datastar/SSE to HTMX. LLM backends switched from
+  OpenRouter to Groq + LLM7 (outlines-cascade cascade `congiuntura`). Multi-arch Docker
+  image (`paluigi/congiuntura-live`, `linux/amd64` + `linux/arm64`) published to Docker Hub;
+  Compose now pulls the image instead of building. Added `.dockerignore` to keep secrets
+  and dev artifacts out of the build context.
 - **0.2.0** (2025-07-21): LLM processing via outlines-cascade. Structured extraction
   (topic, country, sentiment, EN summary, key figures). Anti-hallucination two-model
   architecture. trafilatura scraping. Auto-generated filter UI. OpenRouter backend.

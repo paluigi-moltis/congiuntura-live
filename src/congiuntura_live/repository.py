@@ -31,12 +31,12 @@ class PressReleaseRepository:
         await self._collection.create_index("url_hash", unique=True)
         await self._collection.create_index("publisher")
         await self._collection.create_index([("published", -1)])
-        await self._collection.create_index([("publisher", "published")])
+        await self._collection.create_index([("publisher", 1), ("published", -1)])
         # Processed collection
         await self._processed.create_index("url_hash", unique=True)
         await self._processed.create_index("publisher")
         await self._processed.create_index([("published", -1)])
-        await self._processed.create_index([("publisher", "published")])
+        await self._processed.create_index([("publisher", 1), ("published", -1)])
         await self._processed.create_index("topic")
         await self._processed.create_index("country")
         await self._processed.create_index("sentiment")
@@ -155,19 +155,23 @@ class PressReleaseRepository:
 
     @staticmethod
     def _build_processed_query(filters: dict[str, Any] | None) -> dict[str, Any]:
-        """Build a MongoDB query from frontend filter signals."""
+        """Build a MongoDB query from frontend filter signals.
+
+        ``topic``, ``country``, ``sentiment``, ``publisher`` values are
+        lists — mapped to ``$in`` for multi-select OR semantics.
+        """
         if not filters:
             return {}
         query: dict[str, Any] = {}
         for field, value in filters.items():
-            if value is None or value == "" or value == "all":
-                continue
             if field in ("publisher", "topic", "country", "sentiment"):
-                query[field] = value
+                if isinstance(value, list):
+                    if value:
+                        query[field] = {"$in": value}
+                elif value and value != "all":
+                    query[field] = value
             elif field in ("date_from", "date_to"):
                 continue  # handled below
-            elif field in ("summary_en", "key_figures"):
-                query[field] = {"$regex": value, "$options": "i"}
         # Date range
         date_filter: dict[str, Any] = {}
         if filters.get("date_from"):

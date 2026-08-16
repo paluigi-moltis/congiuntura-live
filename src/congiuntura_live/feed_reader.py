@@ -17,9 +17,7 @@ from .settings import AgencyConfig, FeedConfig
 
 logger = logging.getLogger(__name__)
 
-_FEEDPARSER_USER_AGENT = (
-    "congiuntura-live/0.1 (+https://github.com/paluigi-moltis/congiuntura-live)"
-)
+_FEEDPARSER_USER_AGENT = "congiuntura-live/0.1 (+https://github.com/paluigi/congiuntura-live)"
 
 # Month name → number mapping for date extraction from titles (e.g. INE feeds
 # embed dates like "21 Julio 26" in the title rather than using <pubDate>).

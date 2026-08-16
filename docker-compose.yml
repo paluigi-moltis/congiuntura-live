@@ -2,10 +2,8 @@ services:
   # ─── MongoDB ───────────────────────────────────────────────
   mongo:
     image: mongo:7
-    container_name: congiuntura-mongo
+    container_name: mongo
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -16,13 +14,17 @@ services:
 
   # ─── Application ───────────────────────────────────────────
   app:
-    build: .
+    image: paluigi/congiuntura-live:0.4.0
     container_name: congiuntura-app
     restart: unless-stopped
     ports:
       - "8000:8000"
-    env_file:
-      - .env
+    environment:
+      - MONGODB_URL=mongodb://mongo:27017
+      - MONGODB_DATABASE=congiuntura
+      # LLM API keys — set these for your deployment
+      - LLM7_API_KEY=${LLM7_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
     volumes:
       # Mount config and templates so changes don't require a rebuild
       - ./config:/app/config:ro

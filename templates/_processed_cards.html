@@ -1,0 +1,28 @@
+{% if not results %}
+    <p class="empty">No processed releases found.</p>
+{% else %}
+    {% for r in results %}
+    {% set publisher = r.publisher_full or r.publisher %}
+    {% set publisher_slug = r.publisher %}
+    {% set sentiment = r.sentiment or "" %}
+    {% set sentiment_class = {'positive': 'sentiment-positive', 'negative': 'sentiment-negative', 'neutral': 'sentiment-neutral'}.get(sentiment, 'sentiment-neutral') %}
+    {% set safe_url = r.url if r.url and r.url.startswith(('http://', 'https://')) else '#' %}
+    <article class="card">
+        <div class="card-header">
+            <span class="badge {{ publisher_slug }}">{{ publisher }}</span>
+            <span class="topic">{{ r.topic }}</span>
+            <span class="country">{{ r.country }}</span>
+            <span class="sentiment {{ sentiment_class }}">{{ sentiment }}</span>
+        </div>
+        <h3><a href="{{ safe_url }}" target="_blank" rel="noopener noreferrer">{{ r.title }}</a></h3>
+        <p class="summary-en">{{ r.summary_en }}</p>
+        <div class="key-figures">{{ r.key_figures }}</div>
+        <div class="card-footer">
+            <span class="date">{{ r.published | format_date }}</span>
+            <span class="feed-label">{{ r.feed_label }}</span>
+            <span class="model">🤖 {{ r.processing_model }}</span>
+        </div>
+    </article>
+    {% endfor %}
+{% endif %}
+<span id="retrieved-count" hx-swap-oob="true">{{ retrieved_count }} retrieved</span>
