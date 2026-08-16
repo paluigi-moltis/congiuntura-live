@@ -103,6 +103,7 @@ class ReleaseProcessor:
             "topic": extraction.topic,
             "country": extraction.country,
             "sentiment": extraction.sentiment,
+            "title_en": extraction.title_en,
             "summary_en": extraction.summary_en,
             "key_figures": extraction.key_figures,
         }

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorCollection, AsyncIOMotorDatabase
+from pymongo import AsyncMongoClient
+from pymongo.asynchronous.collection import AsyncCollection
+from pymongo.asynchronous.database import AsyncDatabase
 
 from .models import PressRelease
 
@@ -20,10 +22,10 @@ class PressReleaseRepository:
     """Asynchronous repository for raw press releases in MongoDB."""
 
     def __init__(self, mongo_url: str, database_name: str) -> None:
-        self._client = AsyncIOMotorClient(mongo_url)
-        self._db: AsyncIOMotorDatabase = self._client[database_name]
-        self._collection: AsyncIOMotorCollection = self._db[RAW_COLLECTION]
-        self._processed: AsyncIOMotorCollection = self._db[PROCESSED_COLLECTION]
+        self._client = AsyncMongoClient(mongo_url)
+        self._db: AsyncDatabase = self._client[database_name]
+        self._collection: AsyncCollection = self._db[RAW_COLLECTION]
+        self._processed: AsyncCollection = self._db[PROCESSED_COLLECTION]
 
     async def ensure_indexes(self) -> None:
         """Create indexes for dedup and query performance on both collections."""
@@ -118,6 +120,22 @@ class PressReleaseRepository:
     async def count_total_processed(self) -> int:
         return await self._processed.count_documents({})
 
+    async def find_processed_missing_field(
+        self, field: str, limit: int = 500
+    ) -> list[dict[str, Any]]:
+        """Processed documents where `field` is absent (used for backfills)."""
+        query = {field: {"$exists": False}}
+        cursor = self._processed.find(query, {"_id": 0}).sort("published", -1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def set_processed_field(self, url_hash: str, field: str, value: Any) -> bool:
+        """Set a single field on a processed document by url_hash."""
+        result = await self._processed.update_one(
+            {"url_hash": url_hash},
+            {"$set": {field: value, "updated_at": datetime.now(UTC)}},
+        )
+        return result.modified_count > 0
+
     # ── Unprocessed query (join raw minus processed) ─────────
 
     async def find_unprocessed(self, limit: int = 50) -> list[dict[str, Any]]:
@@ -183,4 +201,4 @@ class PressReleaseRepository:
         return query
 
     async def close(self) -> None:
-        self._client.close()
+        await self._client.close()

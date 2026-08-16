@@ -23,7 +23,7 @@ class TestModelLoading:
 
     def test_model_has_expected_fields(self, model_class):
         fields = set(model_class.model_fields.keys())
-        assert fields == {"topic", "country", "sentiment", "summary_en", "key_figures"}
+        assert fields == {"topic", "country", "sentiment", "title_en", "summary_en", "key_figures"}
 
     def test_no_auto_fields_in_model(self, model_class):
         """The LLM must NOT see url/date/publisher fields."""
@@ -68,6 +68,7 @@ class TestModelLoading:
             topic="GDP",
             country="Italy",
             sentiment="neutral",
+            title_en="GDP grew by 0.3% in Q1 2025",
             summary_en="GDP rose by 0.3% in Q1 2025.",
             key_figures="+0.3% QoQ, +0.9% YoY",
         )

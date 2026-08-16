@@ -21,6 +21,8 @@ from .processor import ReleaseProcessor
 from .repository import PressReleaseRepository
 from .scheduler import FeedPoller, ProcessingPoller
 from .settings import Settings, load_app_config, load_extraction_model, load_feeds_config
+from .calendar import CalendarPoller, CalendarRepository
+from .calendar.config import load_calendar_config
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,8 @@ _poller: FeedPoller | None = None
 _processor: ReleaseProcessor | None = None
 _proc_poller: ProcessingPoller | None = None
 _extraction_model_class = None
+_calendar_repo: CalendarRepository | None = None
+_calendar_poller: CalendarPoller | None = None
 
 # Module-level processing reference counter, incremented by ProcessingPoller
 # and the manual reprocess button.  Polled by the htmx /processing-status endpoint.
@@ -54,10 +58,31 @@ def _processing_dec() -> None:
     _processing_refs = max(0, _processing_refs - 1)
 
 
+async def _initial_calendar_backfill() -> None:
+    """On first run (empty calendar collections), populate the calendar:
+    NSO collectors once + ForexFactory historical backfill. The daily
+    scheduler keeps everything up to date afterwards."""
+    if _calendar_repo is None or _calendar_poller is None:
+        return
+    try:
+        nso_count = await _calendar_repo._nso.count_documents({})
+        ff_count = await _calendar_repo._ff.count_documents({})
+        if nso_count == 0 and ff_count == 0:
+            logger.info("Calendar collections empty — running initial collection")
+            await _calendar_poller.collect_once()
+            ff_upserted = await _calendar_poller.backfill_ff()
+            logger.info("Initial calendar backfill finished (FF: %d events)", ff_upserted)
+        else:
+            logger.info("Calendar already populated (nso=%d, ff=%d) — skipping backfill", nso_count, ff_count)
+    except Exception:
+        logger.exception("Initial calendar backfill failed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
     global _repo, _reader, _poller, _processor, _proc_poller, _extraction_model_class
+    global _calendar_repo, _calendar_poller
 
     settings = Settings()
     app_cfg = load_app_config()
@@ -69,6 +94,15 @@ async def lifespan(app: FastAPI):
 
     _repo = PressReleaseRepository(settings.mongodb_url, settings.mongodb_database)
     await _repo.ensure_indexes()
+
+    # Release calendar (NSO + ForexFactory) — same MongoDB database.
+    calendar_cfg = load_calendar_config()
+    _calendar_repo = CalendarRepository(settings.mongodb_url, settings.mongodb_database)
+    await _calendar_repo.ensure_indexes()
+    _calendar_poller = CalendarPoller(_calendar_repo, calendar_cfg)
+    _calendar_poller.start()
+    # First-run backfill: populate the calendar if collections are empty
+    asyncio.create_task(_initial_calendar_backfill())
 
     _reader = FeedReader()
     _poller = FeedPoller(_reader, _repo)
@@ -89,6 +123,13 @@ async def lifespan(app: FastAPI):
             )
             _proc_poller.start()
             logger.info("LLM processing enabled — cascade '%s'", app_cfg.processing.cascade_name)
+
+            # Startup backfill: translate titles of already-processed releases
+            # that predate the title_en field. Lightweight (title-only LLM
+            # calls, no re-scraping); runs in background, never blocks startup.
+            from .title_backfill import run_title_backfill_on_startup
+
+            asyncio.create_task(run_title_backfill_on_startup(app_cfg.processing, _repo))
         except Exception:
             logger.exception("Failed to start LLM processing — continuing in raw-only mode")
             _processor = None
@@ -97,6 +138,10 @@ async def lifespan(app: FastAPI):
     logger.info("Application started — polling every %d min", app_cfg.polling.interval_minutes)
     yield
 
+    if _calendar_poller:
+        _calendar_poller.stop()
+    if _calendar_repo:
+        await _calendar_repo.close()
     if _proc_poller:
         await _proc_poller.stop()
     if _poller:
@@ -106,7 +151,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application stopped")
 
 
-app = FastAPI(title="Congiuntura Live", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="Congiuntura Live", version="0.5.0", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Serve vendored static assets (htmx.min.js etc.)
@@ -133,6 +178,45 @@ def _format_date(pub_date: Any) -> str:
 
 
 templates.env.filters["format_date"] = _format_date
+
+
+# ── Calendar template filters ───────────────────────────────
+
+
+_SOURCE_NAMES = {
+    "eurostat": "Eurostat", "istat": "Istat", "ine": "INE",
+    "destatis": "Destatis", "insee": "INSEE", "cso": "CSO",
+    "forexfactory": "ForexFactory",
+}
+
+
+def _cal_date(dt: Any) -> str:
+    if not dt:
+        return ""
+    try:
+        d = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
+        return d.strftime("%a %b %d")
+    except (ValueError, TypeError):
+        return str(dt)[:10]
+
+
+def _cal_time(dt: Any) -> str:
+    if not dt:
+        return ""
+    try:
+        d = datetime.fromisoformat(dt) if isinstance(dt, str) else dt
+        return d.strftime("%H:%M UTC")
+    except (ValueError, TypeError):
+        return ""
+
+
+def _cal_source_name(code: Any) -> str:
+    return _SOURCE_NAMES.get(str(code), str(code))
+
+
+templates.env.filters["cal_date"] = _cal_date
+templates.env.filters["cal_time"] = _cal_time
+templates.env.filters["cal_source_name"] = _cal_source_name
 
 
 # ── Model introspection for auto-generated filters ──────────
@@ -351,5 +435,109 @@ async def processing_status(request: Request):
             "processing": _is_processing(),
             "processed_count": processed_count,
             "raw_count": raw_count,
+        },
+    )
+
+
+# ── Release calendar routes ─────────────────────────────────
+
+
+def _get_calendar_repo() -> CalendarRepository:
+    if _calendar_repo is None:
+        raise RuntimeError("Calendar repository not initialized")
+    return _calendar_repo
+
+
+def _parse_calendar_date(raw: str | None) -> datetime | None:
+    """Parse a YYYY-MM-DD date picker value into a naive UTC datetime.
+
+    Mongo returns naive datetimes, so filters must be naive to match.
+    """
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    total = (year * 12 + (month - 1)) + delta
+    return total // 12, total % 12 + 1
+
+
+@app.get("/calendar", response_class=HTMLResponse)
+async def calendar_page(request: Request):
+    """Release calendar page — NSO schedules + ForexFactory events."""
+    repo = _get_calendar_repo()
+    sources = await repo.list_calendar_sources()
+    today = datetime.now(UTC).date()
+    # Default range: current month
+    import calendar as _cal
+    default_from = today.replace(day=1).isoformat()
+    default_to = _cal.monthrange(today.year, today.month)[1]
+    default_to = today.replace(day=default_to).isoformat()
+    return templates.TemplateResponse(
+        request,
+        "calendar.html",
+        {
+            "request": request,
+            "sources": sources,
+            "default_date_from": default_from,
+            "default_date_to": default_to,
+        },
+    )
+
+
+@app.get("/calendar/search", response_class=HTMLResponse)
+async def calendar_search(
+    request: Request,
+    source: str = Query(default="all"),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+    q: str = Query(default=""),
+):
+    """htmx endpoint: filter calendar releases, return card fragment.
+
+    Defaults: current month when no filters; text search active →
+    date_from becomes the first day of the previous month (no date_to).
+    """
+    repo = _get_calendar_repo()
+    today = datetime.now(UTC).date()
+
+    parsed_from = _parse_calendar_date(date_from)
+    parsed_to = _parse_calendar_date(date_to)
+
+    if not date_from and not date_to and not q:
+        import calendar as _cal
+        last = _cal.monthrange(today.year, today.month)[1]
+        parsed_from = datetime(today.year, today.month, 1)
+        parsed_to = datetime(today.year, today.month, last, 23, 59, 59)
+    elif not date_from and q:
+        py, pm = _shift_month(today.year, today.month, -1)
+        parsed_from = datetime(py, pm, 1)
+
+    if parsed_to:
+        parsed_to = parsed_to.replace(hour=23, minute=59, second=59)
+
+    results = await repo.search_calendar(
+        source=source,
+        date_from=parsed_from,
+        date_to=parsed_to,
+        q=q or None,
+        limit=500,
+    )
+
+    # Normalize release_dt for template comparison: Mongo returns naive UTC.
+    now_naive = datetime.now(UTC).replace(tzinfo=None)
+
+    return templates.TemplateResponse(
+        request,
+        "_calendar_cards.html",
+        {
+            "request": request,
+            "results": results,
+            "retrieved_count": len(results),
+            "now": now_naive,
         },
     )

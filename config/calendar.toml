@@ -1,0 +1,14 @@
+# ══════════════════════════════════════════════════════════════════
+# congiuntura-live — release calendar configuration
+# ══════════════════════════════════════════════════════════════════
+
+[polling]
+# Enable/disable scheduled calendar collection.
+enabled = true
+# Daily collection time (UTC). ForexFactory window: (current month - 1)
+# to (current month + 3); NSO calendars refresh in full.
+cron_hour = 7
+cron_minute = 0
+
+# ForexFactory proxy: set FF_PROXY_URL env var if datacenter IPs are
+# blocked (format: http://user:pwd@ipaddr:port). Not stored in this file.

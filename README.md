@@ -30,6 +30,23 @@ and serves a searchable web interface with live updates via HTMX.
 - **Cloud LLM backends** — Groq + LLM7 (both OpenAI-compatible), with cascade failover
 - **Incremental processing** — only processes raw items not yet in the processed collection
 - **Auto-generated filter UI** — selectors for Literal fields, calendar input for date fields
+- **English titles** — every processed release carries `title_en` (original title preserved
+  and shown with the translation below it); existing records are backfilled at startup with
+  lightweight title-only LLM calls
+
+### Release calendar (new in 0.5.0)
+
+- **`/calendar` page** — scheduled data releases from 6 NSOs + ForexFactory (EUR events)
+  in a dedicated calendar view, distinct from the press-release list
+- **7 collectors**: Eurostat/Istat/INE (ICS feeds), Destatis (annual calendar via topic
+  facets), INSEE (embargo calendar), CSO (PxStat API), ForexFactory (monthly HTML scrape
+  with optional `FF_PROXY_URL` proxy)
+- **Daily updates** — APScheduler cron at 07:00 UTC; ForexFactory window covers
+  (current month − 1) → (current month + 3), history is never deleted
+- **Two MongoDB collections** (`nso_releases`, `ff_releases`) with idempotent
+  `source_uid` upserts; FF records store actual/forecast/previous and are updated
+  as values are published
+- **Pure scraping** — calendar records are never touched by any LLM
 
 ---
 
@@ -368,6 +385,14 @@ MIT © Luigi Palumbo
 
 ## Change Log
 
+- **0.5.0**: English title translations (`title_en`) on processed press releases —
+  extracted alongside the other LLM fields for new items, backfilled at startup for
+  existing ones (title-only calls, no re-scraping); card UI shows the original title
+  with the translation below. New `/calendar` page integrating the nso-calendar
+  project: 7 collectors (Eurostat, Istat, INE, Destatis, INSEE, CSO, ForexFactory
+  EUR-only), MongoDB collections `nso_releases`/`ff_releases`, daily APScheduler cron
+  at 07:00 UTC (was weekly in the standalone project), first-run backfill, optional
+  `FF_PROXY_URL`. Migrated from Motor to native PyMongo async (`AsyncMongoClient`).
 - **0.4.0**: Added CSO (Ireland) as 6th monitored agency; added `Ireland` to the
   extraction-model `country` choices; added `.badge.cso` (teal `#008080`); fixed footer,
   README clone URL, and user-agent strings (`paluigi-moltis` → `paluigi`).

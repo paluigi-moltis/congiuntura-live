@@ -15,6 +15,9 @@
             <span class="sentiment {{ sentiment_class }}">{{ sentiment }}</span>
         </div>
         <h3><a href="{{ safe_url }}" target="_blank" rel="noopener noreferrer">{{ r.title }}</a></h3>
+        {% if r.title_en and r.title_en != r.title %}
+        <p class="title-en">🇬🇧 {{ r.title_en }}</p>
+        {% endif %}
         <p class="summary-en">{{ r.summary_en }}</p>
         <div class="key-figures">{{ r.key_figures }}</div>
         <div class="card-footer">

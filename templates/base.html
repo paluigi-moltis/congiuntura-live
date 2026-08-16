@@ -79,6 +79,7 @@
         .sentiment-neutral  { background: #e2e3e5; color: #383d41; }
         .card h3 { margin: 0.3rem 0; font-size: 1.05rem; }
         .card h3 a { text-decoration: none; }
+        .title-en { font-size: 0.9rem; font-style: italic; opacity: 0.85; margin: 0.15rem 0 0.3rem; }
         .summary-en { font-size: 0.95rem; margin: 0.3rem 0; }
         .key-figures { font-size: 0.85rem; opacity: 0.7; margin: 0.3rem 0; font-family: monospace; }
         .card-footer { display: flex; gap: 1rem; font-size: 0.8rem; opacity: 0.7; margin-top: 0.5rem; }
@@ -90,6 +91,39 @@
         #results tr { border-bottom: 1px solid var(--pico-muted-border-color, #ced4da); }
         .feed-label { font-size: 0.75rem; opacity: 0.7; margin-top: 0.2rem; }
         .summary { font-size: 0.85rem; opacity: 0.7; margin-top: 0.3rem; }
+
+        /* ── Release calendar ── */
+        .cal-card {
+            display: flex; align-items: baseline; gap: 1rem;
+            padding: 0.7rem 1rem; margin-bottom: 0.45rem;
+            border-radius: 6px; border-left: 3px solid var(--pico-muted-border-color, #ccc);
+            background: var(--pico-card-background-color, #fff);
+            font-size: 1.02em;
+        }
+        .cal-ff  { border-left-color: #1565c0; background: color-mix(in srgb, #1565c0 7%, var(--pico-card-background-color, #fff)); }
+        .cal-nso { border-left-color: #2e7d32; }
+        .cal-past { opacity: 0.55; }
+        .cal-date { min-width: 130px; font-size: 0.95em; color: var(--pico-muted-color, #555); white-space: nowrap; }
+        .cal-source { min-width: 100px; font-size: 0.9em; font-weight: 600; }
+        .src-nso { color: #2e7d32; }
+        .src-ff  { color: #1565c0; }
+        .cal-title { flex-grow: 1; display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem; }
+        .cal-ref { color: var(--pico-muted-color, #888); }
+        .impact-badge {
+            font-size: 0.7em; padding: 0.1rem 0.35rem; border-radius: 3px;
+            text-transform: uppercase; font-weight: 600;
+        }
+        .impact-badge.high   { background: #ffebee; color: #c62828; }
+        .impact-badge.medium { background: #fff3e0; color: #ef6c00; }
+        .impact-badge.low    { background: color-mix(in srgb, #757575 15%, transparent); color: #757575; }
+        .ff-values {
+            display: inline-grid; grid-template-columns: repeat(3, minmax(5.5rem, auto));
+            gap: 0 0.9rem; font-family: monospace; font-size: 0.82em;
+            background: color-mix(in srgb, #1565c0 12%, transparent);
+            padding: 0.25rem 0.7rem; border-radius: 4px;
+        }
+        .ff-actual { font-weight: 700; color: #0d47a1; }
+        [data-theme="dark"] .ff-actual { color: #90caf9; }
 
         footer { text-align: center; margin-top: 3rem; opacity: 0.5; font-size: 0.8rem; }
 
@@ -111,6 +145,7 @@
         <div style="display: flex; align-items: center; gap: 0.75rem;">
             <nav>
                 <a href="/" class="{% block nav_main %}{% endblock %}">Home</a>
+                <a href="/calendar" class="{% block nav_calendar %}{% endblock %}">Calendar</a>
                 <a href="/raw" class="{% block nav_raw %}{% endblock %}">Raw feeds</a>
             </nav>
             <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark/light">🌓</button>

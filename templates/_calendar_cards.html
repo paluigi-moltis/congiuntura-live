@@ -1,0 +1,40 @@
+{% if not results %}
+    <p class="empty">No releases found for the selected filters.</p>
+{% else %}
+    {% for r in results %}
+    {% set is_ff = r.source == 'forexfactory' %}
+    {% set is_past = r.release_dt < now %}
+    <article class="cal-card {{ 'cal-ff' if is_ff else 'cal-nso' }}{{ ' cal-past' if is_past }}">
+        <div class="cal-date">
+            {{ r.release_dt | cal_date }}<br>
+            <strong>{{ r.release_dt | cal_time }}</strong>
+        </div>
+        <div class="cal-source {{ 'src-ff' if is_ff else 'src-nso' }}">
+            {{ r.source | cal_source_name }}
+        </div>
+        <div class="cal-title">
+            {% if r.impact %}
+            <span class="impact-badge {{ r.impact }}">{{ r.impact }}</span>
+            {% endif %}
+            {% if r.url and is_past %}
+                <a href="{{ r.url }}" target="_blank" rel="noopener noreferrer">{{ r.title }}</a>
+            {% else %}
+                {{ r.title }}
+            {% endif %}
+
+            {% if r.reference_period %}
+                <small class="cal-ref">({{ r.reference_period }})</small>
+            {% endif %}
+
+            {% if is_ff and (r.actual or r.forecast or r.previous) %}
+            <span class="ff-values">
+                {% if r.actual %}<span class="ff-actual">A: {{ r.actual }}</span>{% endif %}
+                {% if r.forecast %}<span>F: {{ r.forecast }}</span>{% endif %}
+                {% if r.previous %}<span>P: {{ r.previous }}</span>{% endif %}
+            </span>
+            {% endif %}
+        </div>
+    </article>
+    {% endfor %}
+{% endif %}
+<span id="retrieved-count" hx-swap-oob="true">{{ retrieved_count }}</span>

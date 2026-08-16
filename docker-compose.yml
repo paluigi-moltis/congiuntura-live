@@ -14,7 +14,7 @@ services:
 
   # ─── Application ───────────────────────────────────────────
   app:
-    image: paluigi/congiuntura-live:0.4.0
+    image: paluigi/congiuntura-live:0.5.0
     container_name: congiuntura-app
     restart: unless-stopped
     ports:
@@ -25,6 +25,8 @@ services:
       # LLM API keys — set these for your deployment
       - LLM7_API_KEY=${LLM7_API_KEY:-}
       - GROQ_API_KEY=${GROQ_API_KEY:-}
+      # Optional HTTP(S) proxy for ForexFactory calendar scraping
+      - FF_PROXY_URL=${FF_PROXY_URL:-}
     volumes:
       # Mount config and templates so changes don't require a rebuild
       - ./config:/app/config:ro

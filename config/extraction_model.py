@@ -53,6 +53,14 @@ class LLMExtraction(BaseModel):
         "neutral",
     ] = Field(description="Economic sentiment conveyed by the data")
 
+    title_en: str = Field(
+        description=(
+            "English translation of the original press release title. "
+            "Keep official statistical terminology. If the title is already "
+            "in English, reproduce it verbatim."
+        )
+    )
+
     summary_en: str = Field(
         description="Concise English summary of the press release (max 150 words)"
     )

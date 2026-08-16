@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block nav_calendar %}active{% endblock %}
+
+{% block title %}Release Calendar — Congiuntura Live{% endblock %}
+
+{% block content %}
+<h2>📅 Release Calendar</h2>
+<p class="subtitle">Scheduled data releases from NSOs and ForexFactory (EUR)</p>
+
+<div class="search-bar" style="grid-template-columns: 1fr 1fr 1fr 2fr;">
+    <form id="calendar-form"
+          hx-get="/calendar/search"
+          hx-target="#calendar-cards"
+          hx-trigger="change, submit, keyup delay:400ms from:find input[name='q']"
+          hx-push-url="false">
+        <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+            <label>Source
+                <select name="source">
+                    <option value="all">All sources</option>
+                    {% for s in sources %}
+                    <option value="{{ s.code }}">{{ s.name }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label>From
+                <input type="date" name="date_from" value="{{ default_date_from }}">
+            </label>
+            <label>To
+                <input type="date" name="date_to" value="{{ default_date_to }}">
+            </label>
+            <label style="flex:2;">
+                Search title
+                <input type="search" name="q" placeholder="Partial match, case-insensitive…">
+            </label>
+        </div>
+    </form>
+</div>
+
+<div class="stats">
+    <span class="stats-inline"><span id="retrieved-count">—</span> releases</span>
+</div>
+
+<div id="calendar-cards" hx-get="/calendar/search" hx-trigger="load">
+    <p class="empty">Loading calendar…</p>
+</div>
+{% endblock %}
