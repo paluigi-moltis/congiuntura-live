@@ -1,10 +1,10 @@
-"""Tests for update-status tracking and the WebSocket hub."""
+"""Tests for update-status tracking and the WebSocket hub (htmx ws extension)."""
 
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from congiuntura_live.update_status import KEY_CALENDAR, KEY_PRESSES, UpdateStatusRepository
-from congiuntura_live.ws_hub import UpdateHub
+from congiuntura_live.ws_hub import UpdateHub, render_indicator_fragment
 
 
 class TestUpdateStatusRepository:
@@ -43,20 +43,22 @@ class TestUpdateStatusRepository:
 
 
 class TestUpdateHub:
-    async def test_broadcast_reaches_clients(self):
+    async def test_broadcast_reaches_subscribed_clients_only(self):
         hub = UpdateHub()
-        ws1, ws2 = MagicMock(), MagicMock()
-        ws1.send_text = AsyncMock()
-        ws2.send_text = AsyncMock()
-        hub._clients = {ws1, ws2}
+        ws_press, ws_cal, ws_other = MagicMock(), MagicMock(), MagicMock()
+        for ws in (ws_press, ws_cal, ws_other):
+            ws.send_text = AsyncMock()
+        hub._clients = {
+            ws_press: {"press_releases"},
+            ws_cal: {"calendar"},
+            ws_other: {"calendar"},
+        }
 
-        await hub.broadcast({"type": "update_status", "press_releases": {"last_run": "2026-08-16 07:00 UTC"}})
+        await hub.broadcast("calendar", "<div id='last-update-calendar'>x</div>")
 
-        ws1.send_text.assert_awaited_once()
-        ws2.send_text.assert_awaited_once()
-        payload = ws1.send_text.await_args.args[0]
-        assert "update_status" in payload
-        assert "2026-08-16 07:00 UTC" in payload
+        ws_press.send_text.assert_not_awaited()
+        ws_cal.send_text.assert_awaited_once()
+        ws_other.send_text.assert_awaited_once()
 
     async def test_broadcast_drops_dead_clients(self):
         hub = UpdateHub()
@@ -64,23 +66,32 @@ class TestUpdateHub:
         ws_dead.send_text = AsyncMock(side_effect=RuntimeError("closed"))
         ws_ok = MagicMock()
         ws_ok.send_text = AsyncMock()
-        hub._clients = {ws_dead, ws_ok}
+        hub._clients = {ws_dead: {"calendar"}, ws_ok: {"calendar"}}
 
-        await hub.broadcast({"type": "ping"})
+        await hub.broadcast("calendar", "<div>x</div>")
 
         assert hub.client_count == 1
         assert ws_ok in hub._clients
 
-    async def test_broadcast_serializes_datetime(self):
-        hub = UpdateHub()
-        ws = MagicMock()
-        ws.send_text = AsyncMock()
-        hub._clients = {ws}
 
-        await hub.broadcast({"when": datetime(2026, 8, 16, 7, 0, 0)})
+class TestIndicatorFragment:
+    def test_fragment_renders_ok_status(self):
+        html = render_indicator_fragment(
+            "press_releases",
+            {"last_run": "2026-08-16 16:44 UTC", "status": "ok", "details": "5 new releases"},
+        )
+        # id matches the element on the page → htmx ws swaps by id
+        assert 'id="last-update-press-releases"' in html
+        assert 'data-kind="press_releases"' in html
+        assert "2026-08-16 16:44 UTC" in html
+        assert "5 new releases" in html
+        assert "✓" in html
 
-        payload = ws.send_text.await_args.args[0]
-        assert "2026-08-16 07:00:00 UTC" in payload
+    def test_fragment_renders_never(self):
+        html = render_indicator_fragment("calendar", {"last_run": None, "status": "never", "details": ""})
+        assert 'id="last-update-calendar"' in html
+        assert "never" in html
+        assert "⚠" not in html
 
 
 class TestSchedulerStatusMarking:

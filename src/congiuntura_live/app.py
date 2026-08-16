@@ -114,16 +114,16 @@ async def lifespan(app: FastAPI):
     _status_repo = UpdateStatusRepository(settings.mongodb_url, settings.mongodb_database)
 
     async def _broadcast_update_status() -> None:
-        """Push the latest last-run timestamps to all connected clients."""
+        """Render and push indicator fragments to subscribed clients."""
+        from .ws_hub import render_indicator_fragment
+
         if _status_repo is None:
             return
         try:
             statuses = await _status_repo.get_all()
-            await update_hub.broadcast({
-                "type": "update_status",
-                "press_releases": _format_status(statuses.get(KEY_PRESSES)),
-                "calendar": _format_status(statuses.get(KEY_CALENDAR)),
-            })
+            for key in (KEY_PRESSES, KEY_CALENDAR):
+                fragment = render_indicator_fragment(key, _format_status(statuses.get(key)))
+                await update_hub.broadcast(key, fragment)
         except Exception:
             logger.exception("Failed to broadcast update status")
 
@@ -614,11 +614,20 @@ async def _update_status_context() -> dict[str, Any]:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    """Push channel for live update-status changes (and future events)."""
+    """Push channel for live update-status indicators (htmx ws extension).
+
+    Clients subscribe to one indicator via ?kind=press|calendar and receive
+    HTML fragments that the extension swaps by element id.
+    """
+    from .ws_hub import VALID_KINDS
+
+    kind_param = ws.query_params.get("kind", "press")
+    kind = "calendar" if kind_param == "calendar" else "press_releases"
+    assert kind in VALID_KINDS
     try:
-        await update_hub.connect(ws)
+        await update_hub.connect(ws, {kind})
         while True:
-            # Client pings keep the socket alive; anything received is ignored
+            # Anything received (htmx pings, client messages) is ignored
             await ws.receive_text()
     except WebSocketDisconnect:
         pass

@@ -173,6 +173,7 @@
 
     <!-- htmx (vendored) -->
     <script src="/static/htmx.min.js"></script>
+    <script src="/static/htmx-ext-ws.min.js"></script>
     <script>
         function toggleTheme() {
             var html = document.documentElement;
@@ -182,46 +183,9 @@
             localStorage.setItem('theme', next);
         }
 
-        // ── Live last-update indicator (WebSocket) ──
-        (function () {
-            if (!('WebSocket' in window)) return;
-            var proto = location.protocol === 'https:' ? 'wss' : 'ws';
-            var reconnectDelay = 5000;
-
-            function connect() {
-                var ws = new WebSocket(proto + '://' + location.host + '/ws');
-                ws.onmessage = function (evt) {
-                    var msg;
-                    try { msg = JSON.parse(evt.data); } catch (e) { return; }
-                    if (msg.type !== 'update_status') return;
-                    applyStatus('press_releases', msg.press_releases);
-                    applyStatus('calendar', msg.calendar);
-                };
-                ws.onopen = function () {
-                    document.querySelectorAll('.last-update').forEach(function (el) {
-                        el.classList.add('ws-live');
-                    });
-                };
-                ws.onclose = function () {
-                    document.querySelectorAll('.last-update').forEach(function (el) {
-                        el.classList.remove('ws-live');
-                    });
-                    setTimeout(connect, reconnectDelay);
-                };
-            }
-
-            function applyStatus(kind, s) {
-                if (!s) return;
-                document.querySelectorAll('.last-update[data-kind="' + kind + '"]').forEach(function (el) {
-                    var t = el.querySelector('.lu-time');
-                    if (t && s.last_run) t.textContent = s.last_run;
-                    var d = el.querySelector('.lu-details');
-                    if (d) d.textContent = s.details || '';
-                });
-            }
-
-            connect();
-        })();
+        // Live last-update indicators use the htmx ws extension
+        // (ws-connect on each indicator wrapper; server pushes HTML
+        // fragments swapped by element id — see templates/_last_update.html)
     </script>
 </body>
 </html>

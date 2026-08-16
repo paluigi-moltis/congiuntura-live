@@ -3,17 +3,23 @@
 {% if which == "press" %}
     {% set s = press_status %}
     {% set label = "Press releases" %}
+    {% set kind = "press_releases" %}
+    {% set kind_param = "press" %}
 {% else %}
     {% set s = calendar_status %}
     {% set label = "Calendar" %}
+    {% set kind = "calendar" %}
+    {% set kind_param = "calendar" %}
 {% endif %}
-<div class="last-update"
-     id="last-update-{{ 'press' if which == 'press' else 'calendar' }}"
-     data-kind="{{ 'press_releases' if which == 'press' else 'calendar' }}">
-    <span class="lu-label">⏱ {{ label }} — last update:</span>
-    <span class="lu-time">{{ s.last_run or "never" }}</span>
-    {% if s.status == "ok" %}<span class="lu-status ok">✓</span>
-    {% elif s.status == "partial" %}<span class="lu-status warn">⚠</span>
-    {% endif %}
-    {% if s.details %}<span class="lu-details">{{ s.details }}</span>{% endif %}
-</div>
+<span hx-ext="ws" ws-connect="/ws?kind={{ kind_param }}">
+    <div class="last-update"
+         id="last-update-{{ kind | replace('_', '-') }}"
+         data-kind="{{ kind }}">
+        <span class="lu-label">⏱ {{ label }} — last update:</span>
+        <span class="lu-time">{{ s.last_run or "never" }}</span>
+        {% if s.status == "ok" %}<span class="lu-status ok">✓</span>
+        {% elif s.status == "partial" %}<span class="lu-status warn">⚠</span>
+        {% endif %}
+        {% if s.details %}<span class="lu-details">{{ s.details }}</span>{% endif %}
+    </div>
+</span>
